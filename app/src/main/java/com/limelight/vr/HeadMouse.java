@@ -157,6 +157,13 @@ public class HeadMouse {
         }
     }
 
+    // Define a pausa de forma explícita (idempotente), para quem precisa garantir o estado (a suíte de testes no Deck)
+    public void setPaused(boolean paused) {
+        toggledPause = paused;
+        VrLog.i("VOL", "pausa %s (definida)", paused ? "ligada" : "desligada");
+        VrTrace.volume(paused ? "pausa_liga" : "pausa_desliga");
+    }
+
     // Liga/desliga o envio; ao voltar, o movimento parte da pose atual (sem pulo)
     public boolean togglePause() {
         toggledPause = !toggledPause;

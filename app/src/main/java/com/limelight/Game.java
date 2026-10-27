@@ -150,7 +150,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private BroadcastReceiver arTestReceiver;
     private BroadcastReceiver traceReceiver;
     private BroadcastReceiver replayReceiver;
+    private BroadcastReceiver pauseReceiver;
     private volatile boolean liveReplayRunning;
+    private volatile boolean liveReplayStop;
     private MoveStick moveStick;
     private boolean attemptedConnection = false;
     private int suppressPipRefCount = 0;
@@ -2410,6 +2412,15 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 }
             }
         };
+        pauseReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                HeadMouse hm = headMouse;
+                if (hm != null) {
+                    hm.setPaused(intent.getBooleanExtra("ligar", true));
+                }
+            }
+        };
         replayReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, final Intent intent) {
@@ -2420,16 +2431,23 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(traceReceiver, new IntentFilter("com.limelight.debug.DECKVR_TRACE"), flags);
             registerReceiver(replayReceiver, new IntentFilter("com.limelight.debug.DECKVR_REPLAY"), flags);
+            registerReceiver(pauseReceiver, new IntentFilter("com.limelight.debug.DECKVR_PAUSA"), flags);
         }
         else {
             registerReceiver(traceReceiver, new IntentFilter("com.limelight.debug.DECKVR_TRACE"));
             registerReceiver(replayReceiver, new IntentFilter("com.limelight.debug.DECKVR_REPLAY"));
+            registerReceiver(pauseReceiver, new IntentFilter("com.limelight.debug.DECKVR_PAUSA"));
         }
     }
 
     private void runReplay(Intent intent) {
         String dirName = intent.getStringExtra("dir");
         java.io.File dir = dirName != null ? new java.io.File(dirName) : new java.io.File(getFilesDir(), "replay");
+        if (intent.getBooleanExtra("parar", false)) {
+            liveReplayStop = true; // aborta o replay ao vivo em andamento; o `finally` dele solta tudo
+            Log.i(VrLog.TAG, "REPLAY ao vivo: parada pedida");
+            return;
+        }
         String caso = intent.getStringExtra("caso");
         boolean live = intent.getBooleanExtra("live", false);
         java.io.File[] files = dir.listFiles((d, name) -> name.endsWith(".csv") && (caso == null || name.equals(caso + ".csv")));
@@ -2479,6 +2497,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
         final MoveStick stickOut = moveStickOrNull();
         liveReplayRunning = true;
+        liveReplayStop = false;
         Log.i(VrLog.TAG, "REPLAY ao vivo iniciando caso=" + csv.getName());
         try {
             final long wallStart = System.nanoTime();
@@ -2503,14 +2522,19 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             };
             ReplayRunner.Pacer pacer = new ReplayRunner.Pacer() {
                 @Override
-                public void waitUntil(long relativeMs) {
-                    long waitMs = relativeMs - (System.nanoTime() - wallStart) / 1_000_000L;
-                    if (waitMs > 0) {
+                public boolean waitUntil(long relativeMs) {
+                    // Dorme em fatias curtas para poder abortar logo quando `parar` chegar
+                    while (!liveReplayStop) {
+                        long waitMs = relativeMs - (System.nanoTime() - wallStart) / 1_000_000L;
+                        if (waitMs <= 0) {
+                            return true;
+                        }
                         try {
-                            Thread.sleep(waitMs);
+                            Thread.sleep(Math.min(waitMs, 50));
                         } catch (InterruptedException ignored) {
                         }
                     }
+                    return false;
                 }
             };
             ReplayRunner.playLive(readLines(csv), sink, pacer);
@@ -2683,6 +2707,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             if (replayReceiver != null) {
                 unregisterReceiver(replayReceiver);
                 replayReceiver = null;
+            }
+            if (pauseReceiver != null) {
+                unregisterReceiver(pauseReceiver);
+                pauseReceiver = null;
             }
             if (moveStick != null) {
                 moveStick.setStick(0f, 0f);

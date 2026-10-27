@@ -24,9 +24,9 @@ public final class ReplayRunner {
         void mouse(int dx, int dy);
     }
 
-    // Ao vivo: espera até o instante `tcMs` do rastro (relativo ao primeiro) antes de processar a linha
+    // Ao vivo: espera até o instante do rastro (relativo ao primeiro) antes de processar a linha; false = abortar já
     public interface Pacer {
-        void waitUntil(long relativeMs);
+        boolean waitUntil(long relativeMs);
     }
 
     public static final class Result {
@@ -178,8 +178,8 @@ public final class ReplayRunner {
             now[0] = r.tc;
             tl.start = Math.min(tl.start, r.tc);
             tl.end = Math.max(tl.end, r.tc);
-            if (pacer != null) {
-                pacer.waitUntil(r.tc - base);
+            if (pacer != null && !pacer.waitUntil(r.tc - base)) {
+                break;
             }
             String[] f = r.f;
             try {
