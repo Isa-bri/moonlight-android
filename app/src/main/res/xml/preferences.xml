@@ -347,6 +347,23 @@
             android:text="@string/suffix_vr_walk_threshold"
             android:title="@string/title_vr_walk_threshold" />
         <CheckBoxPreference
+            android:key="checkbox_vr_strafe"
+            android:dependency="checkbox_vr_cinema"
+            android:title="@string/title_vr_strafe"
+            android:summary="@string/summary_vr_strafe"
+            android:defaultValue="false"/>
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_strafe_angle"
+            android:dependency="checkbox_vr_strafe"
+            android:defaultValue="15"
+            seekbar:min="5"
+            android:max="45"
+            seekbar:step="1"
+            android:dialogMessage="@string/summary_vr_strafe_angle"
+            android:summary="@string/summary_vr_strafe_angle"
+            android:text="@string/suffix_degrees"
+            android:title="@string/title_vr_strafe_angle" />
+        <CheckBoxPreference
             android:key="checkbox_vr_head_mouse"
             android:dependency="checkbox_vr_cinema"
             android:title="@string/title_vr_head_mouse"

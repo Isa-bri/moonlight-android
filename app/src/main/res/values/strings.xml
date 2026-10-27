@@ -273,6 +273,11 @@
     <string name="title_vr_walk_threshold">VR: step sensitivity</string>
     <string name="summary_vr_walk_threshold">Acceleration above gravity that counts as a step. Lower it if steps are missed, raise it if head movements trigger walking</string>
     <string name="suffix_vr_walk_threshold">m/s²</string>
+    <string name="suffix_degrees">°</string>
+    <string name="title_vr_strafe">VR: tilt head to strafe</string>
+    <string name="summary_vr_strafe">Tilting your head toward your left shoulder holds A, toward the right shoulder holds D. Straighten your head to stop</string>
+    <string name="title_vr_strafe_angle">VR: strafe tilt angle</string>
+    <string name="summary_vr_strafe_angle">How far you must tilt your head before A or D is pressed</string>
     <string name="title_vr_head_mouse">VR: head as camera (gyro to mouse)</string>
     <string name="summary_vr_head_mouse">Turning your head moves the mouse, so it aims the game camera. The screen stays fixed in front of your eyes and the cinema head tracking is turned off. While streaming: hold Volume Down to pause the head mouse and reposition your head (like lifting a mouse), press Volume Up to turn it off and on. The phone vibrates on each change</string>
     <string name="title_vr_head_mouse_sensitivity">VR: head mouse sensitivity</string>

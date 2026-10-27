@@ -32,6 +32,7 @@ import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
 import com.limelight.vr.HeadMouse;
+import com.limelight.vr.HeadStrafe;
 import com.limelight.vr.StepWalker;
 import com.limelight.vr.StereoGLView;
 import com.limelight.utils.Dialog;
@@ -134,6 +135,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private boolean vrConnectionStarted = false;
     private HeadMouse headMouse;
     private StepWalker stepWalker;
+    private HeadStrafe headStrafe;
     private StereoGLView vrView;
     private BroadcastReceiver mouseTestReceiver;
     private boolean attemptedConnection = false;
@@ -2327,6 +2329,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 headMouse.stop();
                 headMouse = null;
             }
+            if (headStrafe != null) {
+                headStrafe.stop();
+                headStrafe = null;
+            }
             if (stepWalker != null) {
                 stepWalker.stop();
                 stepWalker = null;
@@ -2528,6 +2534,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 }
 
                 registerMouseLatencyTest();
+
+                if (prefConfig.vrCinema && prefConfig.vrStrafe && headStrafe == null) {
+                    headStrafe = new HeadStrafe(Game.this, conn, prefConfig.vrStrafeAngle);
+                    if (!headStrafe.start()) {
+                        LimeLog.warning("Sem giroscópio: inclinar a cabeça para andar de lado indisponível");
+                        headStrafe = null;
+                    }
+                }
 
                 if (prefConfig.vrCinema && prefConfig.vrWalk && stepWalker == null) {
                     stepWalker = new StepWalker(Game.this, conn, prefConfig.vrWalkThreshold / 10f);
