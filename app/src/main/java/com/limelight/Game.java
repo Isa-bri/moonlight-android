@@ -33,6 +33,7 @@ import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
 import com.limelight.vr.HeadMouse;
 import com.limelight.vr.HeadStrafe;
+import com.limelight.vr.ArPosition;
 import com.limelight.vr.StepWalker;
 import com.limelight.vr.StereoGLView;
 import com.limelight.utils.Dialog;
@@ -136,6 +137,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private HeadMouse headMouse;
     private StepWalker stepWalker;
     private HeadStrafe headStrafe;
+    private ArPosition arPosition;
     private StereoGLView vrView;
     private BroadcastReceiver mouseTestReceiver;
     private boolean attemptedConnection = false;
@@ -1346,6 +1348,27 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
     }
 
+    private void startArPosition() {
+        if (checkSelfPermission(android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.CAMERA}, 4201);
+            return;
+        }
+        arPosition = new ArPosition(Game.this, conn, prefConfig.vrPositionDistance / 100f);
+        if (!arPosition.start()) {
+            LimeLog.warning("ARCore indisponível: andar movendo o corpo desligado");
+            arPosition = null;
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 4201 && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                && connected && arPosition == null) {
+            startArPosition();
+        }
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (headMouse != null) {
@@ -1450,6 +1473,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         if (headMouse != null) {
             if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
                 headMouse.setClutch(false);
+                if (arPosition != null) {
+                    arPosition.recenter();
+                }
                 vibrateShort();
                 return true;
             }
@@ -2329,6 +2355,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 headMouse.stop();
                 headMouse = null;
             }
+            if (arPosition != null) {
+                arPosition.stop();
+                arPosition = null;
+            }
             if (headStrafe != null) {
                 headStrafe.stop();
                 headStrafe = null;
@@ -2541,6 +2571,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         LimeLog.warning("Sem giroscópio: inclinar a cabeça para andar de lado indisponível");
                         headStrafe = null;
                     }
+                }
+
+                if (prefConfig.vrCinema && prefConfig.vrPosition && arPosition == null) {
+                    startArPosition();
                 }
 
                 if (prefConfig.vrCinema && prefConfig.vrWalk && stepWalker == null) {

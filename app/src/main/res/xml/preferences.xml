@@ -364,6 +364,23 @@
             android:text="@string/suffix_degrees"
             android:title="@string/title_vr_strafe_angle" />
         <CheckBoxPreference
+            android:key="checkbox_vr_position"
+            android:dependency="checkbox_vr_cinema"
+            android:title="@string/title_vr_position"
+            android:summary="@string/summary_vr_position"
+            android:defaultValue="false"/>
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_position_distance"
+            android:dependency="checkbox_vr_position"
+            android:defaultValue="10"
+            seekbar:min="5"
+            android:max="40"
+            seekbar:step="1"
+            android:dialogMessage="@string/summary_vr_position_distance"
+            android:summary="@string/summary_vr_position_distance"
+            android:text="@string/suffix_cm"
+            android:title="@string/title_vr_position_distance" />
+        <CheckBoxPreference
             android:key="checkbox_vr_head_mouse"
             android:dependency="checkbox_vr_cinema"
             android:title="@string/title_vr_head_mouse"

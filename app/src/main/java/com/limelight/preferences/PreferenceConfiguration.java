@@ -58,6 +58,8 @@ public class PreferenceConfiguration {
     private static final String VR_WALK_THRESHOLD_PREF_STRING = "seekbar_vr_walk_threshold";
     private static final String VR_STRAFE_PREF_STRING = "checkbox_vr_strafe";
     private static final String VR_STRAFE_ANGLE_PREF_STRING = "seekbar_vr_strafe_angle";
+    private static final String VR_POSITION_PREF_STRING = "checkbox_vr_position";
+    private static final String VR_POSITION_DISTANCE_PREF_STRING = "seekbar_vr_position_distance";
     private static final String VR_CHROMATIC_PREF_STRING = "seekbar_vr_chromatic";
     private static final String VR_IPD_PREF_STRING = "seekbar_vr_ipd_mm";
     private static final String VR_SCREEN_DISTANCE_PREF_STRING = "seekbar_vr_screen_distance_cm";
@@ -112,6 +114,8 @@ public class PreferenceConfiguration {
     private static final int DEFAULT_VR_WALK_THRESHOLD = 20;
     private static final boolean DEFAULT_VR_STRAFE = false;
     private static final int DEFAULT_VR_STRAFE_ANGLE = 15;
+    private static final boolean DEFAULT_VR_POSITION = false;
+    private static final int DEFAULT_VR_POSITION_DISTANCE = 10;
     private static final int DEFAULT_VR_CHROMATIC = 0;
     private static final int DEFAULT_VR_IPD_MM = 63;
     private static final int DEFAULT_VR_SCREEN_DISTANCE_CM = 200;
@@ -173,6 +177,8 @@ public class PreferenceConfiguration {
     public int vrWalkThreshold; // décimos de m/s² acima da gravidade para contar um passo
     public boolean vrStrafe;
     public int vrStrafeAngle; // graus de inclinação da cabeça para segurar A/D
+    public boolean vrPosition;
+    public int vrPositionDistance; // cm de deslocamento da cabeça (ARCore) para segurar W/A/S/D
     public int vrChromatic; // separação vermelho/azul em centésimos de k1; 0 = sem correção
     public int vrIpdMm;
     public int vrLensDistortion; // k1 em centésimos; 0 = sem correção
@@ -636,6 +642,8 @@ public class PreferenceConfiguration {
         config.vrWalkThreshold = prefs.getInt(VR_WALK_THRESHOLD_PREF_STRING, DEFAULT_VR_WALK_THRESHOLD);
         config.vrStrafe = prefs.getBoolean(VR_STRAFE_PREF_STRING, DEFAULT_VR_STRAFE);
         config.vrStrafeAngle = prefs.getInt(VR_STRAFE_ANGLE_PREF_STRING, DEFAULT_VR_STRAFE_ANGLE);
+        config.vrPosition = prefs.getBoolean(VR_POSITION_PREF_STRING, DEFAULT_VR_POSITION);
+        config.vrPositionDistance = prefs.getInt(VR_POSITION_DISTANCE_PREF_STRING, DEFAULT_VR_POSITION_DISTANCE);
         config.vrChromatic = prefs.getInt(VR_CHROMATIC_PREF_STRING, DEFAULT_VR_CHROMATIC);
         config.vrIpdMm = prefs.getInt(VR_IPD_PREF_STRING, DEFAULT_VR_IPD_MM);
         config.vrHeadMouse = prefs.getBoolean(VR_HEAD_MOUSE_PREF_STRING, DEFAULT_VR_HEAD_MOUSE);
