@@ -46,6 +46,8 @@ import android.app.PictureInPictureParams;
 import android.app.Service;
 import android.content.ComponentName;
 import android.content.Context;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
@@ -1323,8 +1325,37 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         return (byte) modifierFlags;
     }
 
+    private void vibrateShort() {
+        Vibrator vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        if (vibrator != null && vibrator.hasVibrator()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE));
+            }
+            else {
+                vibrator.vibrate(40);
+            }
+        }
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (headMouse != null) {
+            // Com o celular no óculos não dá para tocar na tela: os botões de volume controlam a cabeça
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                if (event.getRepeatCount() == 0) {
+                    headMouse.setClutch(true);
+                    vibrateShort();
+                }
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                if (event.getRepeatCount() == 0) {
+                    headMouse.togglePause();
+                    vibrateShort();
+                }
+                return true;
+            }
+        }
         return handleKeyDown(event) || super.onKeyDown(keyCode, event);
     }
 
@@ -1407,6 +1438,16 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (headMouse != null) {
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                headMouse.setClutch(false);
+                vibrateShort();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                return true;
+            }
+        }
         return handleKeyUp(event) || super.onKeyUp(keyCode, event);
     }
 
@@ -2425,7 +2466,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 updatePipAutoEnter();
 
                 if (prefConfig.vrCinema && prefConfig.vrHeadMouse && headMouse == null) {
-                    headMouse = new HeadMouse(Game.this, conn, prefConfig.vrHeadMouseSensitivity);
+                    headMouse = new HeadMouse(Game.this, conn, prefConfig.vrHeadMouseSensitivity, prefConfig.vrHeadMousePitchPercent / 100f);
                     if (!headMouse.start()) {
                         LimeLog.warning("Sem giroscópio: cabeça = câmera indisponível");
                         headMouse = null;

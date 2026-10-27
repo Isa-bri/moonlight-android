@@ -264,6 +264,9 @@
     <string name="summary_vr_head_mouse">Turning your head moves the mouse, so it aims the game camera. The screen stays fixed in front of your eyes and the cinema head tracking is turned off</string>
     <string name="title_vr_head_mouse_sensitivity">VR: head mouse sensitivity</string>
     <string name="summary_vr_head_mouse_sensitivity">Mouse counts sent per degree of head rotation. Raise it until a full turn of your head matches a full turn in the game</string>
+    <string name="title_vr_head_mouse_pitch">VR: head mouse vertical sensitivity</string>
+    <string name="summary_vr_head_mouse_pitch">Looking up and down as a percentage of the horizontal sensitivity. Volume down held pauses the head mouse while you reposition, volume up toggles it</string>
+    <string name="suffix_percent">%</string>
     <string name="suffix_vr_counts_per_degree">counts/deg</string>
     <string name="title_enable_perf_overlay">Show performance stats while streaming</string>
     <string name="summary_enable_perf_overlay">Display real-time stream performance information while streaming</string>

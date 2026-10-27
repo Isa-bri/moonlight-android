@@ -19,10 +19,13 @@ public class HeadMouse {
     private final HeadTracker tracker;
     private final NvConnection conn;
     private final float countsPerDegree;
+    private final float pitchCountsPerDegree;
 
     private HandlerThread thread;
     private Handler handler;
     private volatile boolean running;
+    private volatile boolean toggledPause;
+    private volatile boolean clutch;
 
     private final float[] worldToEye = new float[16];
     private boolean hasPrev;
@@ -40,10 +43,11 @@ public class HeadMouse {
         }
     };
 
-    public HeadMouse(Context context, NvConnection conn, float countsPerDegree) {
+    public HeadMouse(Context context, NvConnection conn, float countsPerDegree, float pitchScale) {
         this.tracker = new HeadTracker(context);
         this.conn = conn;
         this.countsPerDegree = countsPerDegree;
+        this.pitchCountsPerDegree = countsPerDegree * pitchScale;
     }
 
     public boolean start() {
@@ -67,13 +71,24 @@ public class HeadMouse {
         }
     }
 
-    // O próximo movimento parte da pose atual (útil depois de pausar ou tirar o óculos)
-    public void recenter() {
-        hasPrev = false;
+    // Liga/desliga o envio; ao voltar, o movimento parte da pose atual (sem pulo)
+    public boolean togglePause() {
+        toggledPause = !toggledPause;
+        return toggledPause;
+    }
+
+    // Embreagem: enquanto segurada, a cabeça gira sem mexer a câmera (como levantar o mouse da mesa)
+    public void setClutch(boolean held) {
+        clutch = held;
     }
 
     private void poll() {
         if (!tracker.getWorldToEye(worldToEye)) {
+            return;
+        }
+
+        if (toggledPause || clutch) {
+            hasPrev = false;
             return;
         }
 
@@ -103,7 +118,7 @@ public class HeadMouse {
 
         // Guarda a fração que não cabe num inteiro para não perder movimento lento
         remX += dYaw * countsPerDegree;
-        remY += -dPitch * countsPerDegree;
+        remY += -dPitch * pitchCountsPerDegree;
         int mx = (int) remX;
         int my = (int) remY;
         remX -= mx;

@@ -310,6 +310,17 @@
             android:summary="@string/summary_vr_head_mouse_sensitivity"
             android:text="@string/suffix_vr_counts_per_degree"
             android:title="@string/title_vr_head_mouse_sensitivity" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_head_mouse_pitch_percent"
+            android:dependency="checkbox_vr_head_mouse"
+            android:defaultValue="100"
+            seekbar:min="25"
+            android:max="200"
+            seekbar:step="5"
+            android:dialogMessage="@string/summary_vr_head_mouse_pitch"
+            android:summary="@string/summary_vr_head_mouse_pitch"
+            android:text="@string/suffix_percent"
+            android:title="@string/title_vr_head_mouse_pitch" />
         <CheckBoxPreference
             android:key="checkbox_enable_perf_overlay"
             android:title="@string/title_enable_perf_overlay"

@@ -52,6 +52,7 @@ public class PreferenceConfiguration {
     private static final String VR_HEAD_TRACKING_PREF_STRING = "checkbox_vr_head_tracking";
     private static final String VR_HEAD_MOUSE_PREF_STRING = "checkbox_vr_head_mouse";
     private static final String VR_HEAD_MOUSE_SENSITIVITY_PREF_STRING = "seekbar_vr_head_mouse_sensitivity";
+    private static final String VR_HEAD_MOUSE_PITCH_PREF_STRING = "seekbar_vr_head_mouse_pitch_percent";
     private static final String VR_SCREEN_DISTANCE_PREF_STRING = "seekbar_vr_screen_distance_cm";
     private static final String VR_SCREEN_HEIGHT_PREF_STRING = "seekbar_vr_screen_height_cm";
     private static final String ENABLE_PERF_OVERLAY_STRING = "checkbox_enable_perf_overlay";
@@ -98,6 +99,7 @@ public class PreferenceConfiguration {
     // 2,0 m de distância e 1,30 m de altura: tela de 60 graus de largura (16:9)
     private static final boolean DEFAULT_VR_HEAD_MOUSE = false;
     private static final int DEFAULT_VR_HEAD_MOUSE_SENSITIVITY = 10;
+    private static final int DEFAULT_VR_HEAD_MOUSE_PITCH_PERCENT = 100;
     private static final int DEFAULT_VR_SCREEN_DISTANCE_CM = 200;
     private static final int DEFAULT_VR_SCREEN_HEIGHT_CM = 130;
     private static final boolean DEFAULT_ENABLE_PERF_OVERLAY = false;
@@ -153,6 +155,7 @@ public class PreferenceConfiguration {
     public int vrScreenDistanceCm;
     public int vrScreenHeightCm;
     public boolean vrHeadMouse;
+    public int vrHeadMousePitchPercent; // vertical em % da sensibilidade horizontal
     public int vrHeadMouseSensitivity; // contagens de mouse por grau de rotação da cabeça
     public boolean enablePerfOverlay;
     public boolean enableLatencyToast;
@@ -606,6 +609,7 @@ public class PreferenceConfiguration {
         config.vrHeadTracking = prefs.getBoolean(VR_HEAD_TRACKING_PREF_STRING, DEFAULT_VR_HEAD_TRACKING);
         config.vrScreenDistanceCm = prefs.getInt(VR_SCREEN_DISTANCE_PREF_STRING, DEFAULT_VR_SCREEN_DISTANCE_CM);
         config.vrScreenHeightCm = prefs.getInt(VR_SCREEN_HEIGHT_PREF_STRING, DEFAULT_VR_SCREEN_HEIGHT_CM);
+        config.vrHeadMousePitchPercent = prefs.getInt(VR_HEAD_MOUSE_PITCH_PREF_STRING, DEFAULT_VR_HEAD_MOUSE_PITCH_PERCENT);
         config.vrHeadMouse = prefs.getBoolean(VR_HEAD_MOUSE_PREF_STRING, DEFAULT_VR_HEAD_MOUSE);
         config.vrHeadMouseSensitivity = prefs.getInt(VR_HEAD_MOUSE_SENSITIVITY_PREF_STRING, DEFAULT_VR_HEAD_MOUSE_SENSITIVITY);
         config.enablePerfOverlay = prefs.getBoolean(ENABLE_PERF_OVERLAY_STRING, DEFAULT_ENABLE_PERF_OVERLAY);
