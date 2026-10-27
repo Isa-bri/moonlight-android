@@ -56,6 +56,16 @@ public class ArPosition {
     private final float sideReleaseM;
     private final boolean holdMode; // true = joystick (segura enquanto longe da origem); false = só enquanto se move
     private final ArMotionKeys motion;
+    private final MoveStick stickSink;     // não nulo = movimento vira analógico esquerdo em vez de W/A/S/D
+    private final ArMotionStick stick;
+    private float lastStickX, lastStickY;
+    private volatile boolean stickWalking;
+    private float lastStickLogX, lastStickLogY;
+
+    // Só para testes por broadcast: soma ao deslocamento medido um deslocamento que cresce na velocidade pedida (m/s)
+    private volatile float testVF, testVS;
+    private float testF, testS;
+    private long lastTestNs;
 
     private Thread thread;
     private volatile boolean running;
@@ -77,10 +87,12 @@ public class ArPosition {
     private boolean hasPrevPose;
     private long lastPoseNs;
 
-    public ArPosition(Context context, NvConnection conn, float thresholdM, boolean holdMode) {
+    public ArPosition(Context context, NvConnection conn, float thresholdM, boolean holdMode, MoveStick stickSink) {
         this.context = context;
         this.conn = conn;
         this.holdMode = holdMode;
+        this.stickSink = stickSink;
+        this.stick = new ArMotionStick(thresholdM, thresholdM * 4f, MOTION_WINDOW_NS);
         this.motion = new ArMotionKeys(thresholdM, SIDE_FACTOR, MOTION_WINDOW_NS);
         this.thresholdM = thresholdM;
         this.releaseM = thresholdM * 0.6f; // histerese
@@ -112,7 +124,13 @@ public class ArPosition {
     }
 
     public boolean isWalking() {
-        return fwdHeld || backHeld || leftHeld || rightHeld;
+        return fwdHeld || backHeld || leftHeld || rightHeld || stickWalking;
+    }
+
+    // Teste por broadcast: velocidade falsa (m/s) para a frente e para a direita; 0,0 para de crescer (o deslocamento fica)
+    public void setTestVelocity(float forwardMps, float sideMps) {
+        testVF = forwardMps;
+        testVS = sideMps;
     }
 
     // A próxima leitura vira a origem
@@ -172,7 +190,7 @@ public class ArPosition {
             session.setDisplayGeometry(Surface.ROTATION_90, 1, 1);
             session.resume();
             VrLog.i("AR", "iniciado modo=%s limiar=%.0fcm lado=%.0fcm soltura=%.0f%% resolucao=%s",
-                    holdMode ? "joystick(segura longe da origem)" : "so_enquanto_se_move", thresholdM * 100, sideThresholdM * 100, releaseM / thresholdM * 100,
+                    stickSink != null ? "analogico" : holdMode ? "joystick(segura longe da origem)" : "so_enquanto_se_move", thresholdM * 100, sideThresholdM * 100, releaseM / thresholdM * 100,
                     smallest != null ? smallest.getImageSize().getWidth() + "x" + smallest.getImageSize().getHeight() : "?");
 
             float originX = 0, originZ = 0;
@@ -214,10 +232,15 @@ public class ArPosition {
                 Pose pose = camera.getPose();
                 float x = pose.tx();
                 float z = pose.tz();
+                boolean poseJumped = false;
                 if (hasPrevPose && Math.hypot(x - prevX, z - prevZ) > JUMP_M) {
                     winJumps++;
-                    VrLog.w("AR", "salto de pose %.2fm entre quadros (%.0fms)", Math.hypot(x - prevX, z - prevZ),
+                    poseJumped = true;
+                    VrLog.w("AR", "salto de pose %.2fm entre quadros (%.0fms): ignorado, sem tecla", Math.hypot(x - prevX, z - prevZ),
                             (frameNs - lastPoseNs) / 1e6);
+                    // A origem acompanha o salto, então o deslocamento fica contínuo (vale para o modo joystick)
+                    originX += x - prevX;
+                    originZ += z - prevZ;
                 }
                 prevX = x;
                 prevZ = z;
@@ -241,6 +264,7 @@ public class ArPosition {
                     bodyX = fwdX;
                     bodyZ = fwdZ;
                     motion.reset();
+                    testF = testS = 0;
                     releaseAll("recentrou");
                 }
 
@@ -248,6 +272,14 @@ public class ArPosition {
                 // direita = (-bodyZ, bodyX) no sistema do ARCore (Y para cima, olhando para -Z)
                 float forward = dx * bodyX + dz * bodyZ;
                 float side = dx * -bodyZ + dz * bodyX;
+                if (lastTestNs != 0) {
+                    float dtTest = (frameNs - lastTestNs) / 1e9f;
+                    testF += testVF * dtTest;
+                    testS += testVS * dtTest;
+                }
+                lastTestNs = frameNs;
+                forward += testF;
+                side += testS;
 
                 curForward = forward;
                 curSide = side;
@@ -256,8 +288,24 @@ public class ArPosition {
                 winMinSide = Math.min(winMinSide, side);
                 winMaxSide = Math.max(winMaxSide, side);
 
+                if (stickSink != null) {
+                    if (poseJumped) {
+                        stick.reset();
+                    }
+                    else {
+                        stick.update(forward, side, frameNs);
+                    }
+                    sendStick(stick.x, stick.y);
+                    logWindow();
+                    continue;
+                }
+
                 boolean wantFwd, wantBack, wantRight, wantLeft;
-                if (holdMode) {
+                if (poseJumped) {
+                    motion.reset();
+                    wantFwd = wantBack = wantRight = wantLeft = false;
+                }
+                else if (holdMode) {
                     wantFwd = hold(fwdHeld, forward);
                     wantBack = hold(backHeld, -forward);
                     wantRight = holdSide(rightHeld, side);
@@ -325,7 +373,28 @@ public class ArPosition {
         return want;
     }
 
+    // Manda o analógico quando muda o bastante (1/256) e sempre que volta a zero
+    private void sendStick(float x, float y) {
+        boolean zero = x == 0 && y == 0;
+        if (zero ? (lastStickX == 0 && lastStickY == 0)
+                : Math.abs(x - lastStickX) < 1 / 256f && Math.abs(y - lastStickY) < 1 / 256f) {
+            return;
+        }
+        lastStickX = x;
+        lastStickY = y;
+        stickWalking = Math.hypot(x, y) > 0.1;
+        stickSink.setStick(x, y);
+    }
+
     private void releaseAll(String why) {
+        if (stickSink != null) {
+            if (lastStickX != 0 || lastStickY != 0) {
+                VrLog.i("AR", "analogico zerado: %s", why);
+            }
+            stick.reset();
+            sendStick(0f, 0f);
+            return;
+        }
         if (isWalking()) {
             VrLog.i("AR", "soltando tudo: %s", why);
         }
@@ -359,12 +428,12 @@ public class ArPosition {
         if (now - lastLog < LOG_WINDOW_MS) {
             return;
         }
-        VrLog.i("AR", "quadros=%.0f/s gap_max=%.0fms frente=%+.2f..%+.2fm lado=%+.2f..%+.2fm teclas=%s%s%s%s perdas=%d saltos=%d",
+        VrLog.i("AR", "quadros=%.0f/s gap_max=%.0fms frente=%+.2f..%+.2fm lado=%+.2f..%+.2fm teclas=%s%s%s%s analogico=%+.2f,%+.2f perdas=%d saltos=%d",
                 winFrames * 1000.0 / (now - lastLog), winMaxGapNs / 1e6,
                 winMinFwd == Float.MAX_VALUE ? 0f : winMinFwd, winMaxFwd == -Float.MAX_VALUE ? 0f : winMaxFwd,
                 winMinSide == Float.MAX_VALUE ? 0f : winMinSide, winMaxSide == -Float.MAX_VALUE ? 0f : winMaxSide,
                 fwdHeld ? "W" : "", backHeld ? "S" : "", leftHeld ? "A" : "", rightHeld ? "D" : "",
-                winLost, winJumps);
+                lastStickX, lastStickY, winLost, winJumps);
         lastLog = now;
         winFrames = winLost = winJumps = 0;
         winMaxGapNs = 0;

@@ -56,6 +56,7 @@ public class PreferenceConfiguration {
     private static final String VR_EDGE_TURN_PREF_STRING = "checkbox_vr_edge_turn";
     private static final String VR_EDGE_TURN_ANGLE_PREF_STRING = "seekbar_vr_edge_turn_angle";
     private static final String VR_POSITION_HOLD_PREF_STRING = "checkbox_vr_position_hold";
+    private static final String VR_MOVE_ANALOG_PREF_STRING = "checkbox_vr_move_analog";
     private static final String VR_SNAP_TURN_PREF_STRING = "checkbox_vr_snap_turn";
     private static final String VR_MOUSE_SYNC_PREF_STRING = "checkbox_vr_mouse_sync";
     private static final String VR_WALK_PITCH_BAND_PREF_STRING = "seekbar_vr_walk_pitch_band";
@@ -118,6 +119,7 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_VR_EDGE_TURN = false;
     private static final int DEFAULT_VR_EDGE_TURN_ANGLE = 45;
     private static final boolean DEFAULT_VR_POSITION_HOLD = false;
+    private static final boolean DEFAULT_VR_MOVE_ANALOG = false;
     private static final boolean DEFAULT_VR_SNAP_TURN = false;
     private static final boolean DEFAULT_VR_MOUSE_SYNC = false;
     private static final int DEFAULT_VR_WALK_PITCH_BAND = 15;
@@ -198,6 +200,7 @@ public class PreferenceConfiguration {
     public boolean vrEdgeTurn;
     public int vrEdgeTurnAngle; // graus para cada lado do centro antes de a câmera girar sozinha
     public boolean vrPositionHold; // ARCore como joystick: segura a tecla enquanto longe da origem (padrão: só enquanto se move)
+    public boolean vrMoveAnalog;   // movimento do corpo vira analógico esquerdo de um controle virtual, em vez de W/A/S/D
     public boolean vrSnapTurn;  // giro da borda em passos fixos em vez de contínuo
     public boolean vrMouseSync; // manda o mouse a cada amostra do sensor, em vez de um tick de 4 ms
     public int vrWalkPitchBand; // décimos de grau de zona morta vertical ao andar (0 = desligada)
@@ -667,6 +670,7 @@ public class PreferenceConfiguration {
         config.vrEdgeTurn = prefs.getBoolean(VR_EDGE_TURN_PREF_STRING, DEFAULT_VR_EDGE_TURN);
         config.vrEdgeTurnAngle = prefs.getInt(VR_EDGE_TURN_ANGLE_PREF_STRING, DEFAULT_VR_EDGE_TURN_ANGLE);
         config.vrPositionHold = prefs.getBoolean(VR_POSITION_HOLD_PREF_STRING, DEFAULT_VR_POSITION_HOLD);
+        config.vrMoveAnalog = prefs.getBoolean(VR_MOVE_ANALOG_PREF_STRING, DEFAULT_VR_MOVE_ANALOG);
         config.vrSnapTurn = prefs.getBoolean(VR_SNAP_TURN_PREF_STRING, DEFAULT_VR_SNAP_TURN);
         config.vrMouseSync = prefs.getBoolean(VR_MOUSE_SYNC_PREF_STRING, DEFAULT_VR_MOUSE_SYNC);
         config.vrWalkPitchBand = prefs.getInt(VR_WALK_PITCH_BAND_PREF_STRING, DEFAULT_VR_WALK_PITCH_BAND);

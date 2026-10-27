@@ -1074,9 +1074,28 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         }
     }
 
+    // Movimento do corpo como analógico esquerdo do controle 0 (fork DeckVR). Liga o controle virtual no host, então um
+    // Steam Deck usado ao mesmo tempo perde o analógico dele (conclusão da Fase 0): só para quem joga com controle no celular.
+    private volatile boolean motionStickEnabled;
+    private volatile short motionStickX, motionStickY;
+
+    public void setMotionStickEnabled(boolean enabled) {
+        motionStickEnabled = enabled;
+    }
+
+    // x para a direita, y para a frente, em [-1, 1]; chamar na thread principal
+    public void setMotionStick(float x, float y) {
+        if (!motionStickEnabled) {
+            return;
+        }
+        motionStickX = (short) Math.round(Math.max(-1f, Math.min(1f, x)) * 32767);
+        motionStickY = (short) Math.round(Math.max(-1f, Math.min(1f, y)) * 32767);
+        sendControllerInputPacket(defaultContext);
+    }
+
     private short getActiveControllerMask() {
         if (prefConfig.multiController) {
-            return (short)(currentControllers | initialControllers | (prefConfig.onscreenController ? 1 : 0));
+            return (short)(currentControllers | initialControllers | ((prefConfig.onscreenController || motionStickEnabled) ? 1 : 0));
         }
         else {
             // Only Player 1 is active with multi-controller disabled
@@ -1248,6 +1267,11 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
                 rightStickX |= maxByMagnitude(rightStickX, context.rightStickX);
                 rightStickY |= maxByMagnitude(rightStickY, context.rightStickY);
             }
+        }
+        if (motionStickEnabled && controllerNumber == 0) {
+            // Movimento do corpo (ARCore / andar no lugar) como analógico esquerdo: vale o de maior intensidade
+            leftStickX = maxByMagnitude(leftStickX, motionStickX);
+            leftStickY = maxByMagnitude(leftStickY, motionStickY);
         }
         if (defaultContext.controllerNumber == controllerNumber) {
             inputMap |= defaultContext.inputMap;

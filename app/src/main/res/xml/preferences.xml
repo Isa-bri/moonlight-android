@@ -387,6 +387,12 @@
             android:summary="@string/summary_vr_position_hold"
             android:defaultValue="false"/>
         <CheckBoxPreference
+            android:key="checkbox_vr_move_analog"
+            android:dependency="checkbox_vr_cinema"
+            android:title="@string/title_vr_move_analog"
+            android:summary="@string/summary_vr_move_analog"
+            android:defaultValue="false"/>
+        <CheckBoxPreference
             android:key="checkbox_vr_head_mouse"
             android:dependency="checkbox_vr_cinema"
             android:title="@string/title_vr_head_mouse"

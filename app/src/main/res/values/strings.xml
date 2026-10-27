@@ -293,6 +293,8 @@
     <string name="summary_vr_edge_turn_angle">Degrees to each side of the center before the camera starts turning by itself</string>
     <string name="title_vr_position_hold">VR: ARCore joystick mode (hold while away from start)</string>
     <string name="summary_vr_position_hold">Off (default): the key is held only while you are actually moving, and releases when you stop. On: the key stays held for as long as you stand away from your starting point, like a joystick; step back to the start (or release Volume Down to set a new start) to stop.</string>
+    <string name="title_vr_move_analog">VR: movement as left analog stick (analog-only games)</string>
+    <string name="summary_vr_move_analog">Walking in place and moving your body (ARCore) drive the left analog stick of a virtual controller instead of the W/A/S/D keys: direction and speed are proportional, so diagonals and slow walking work in games that ignore the keyboard. It creates a virtual gamepad on the host, which stops a Steam Deck used at the same time from working: use it with a controller paired to the phone, not with the Deck in your hands.</string>
     <string name="title_vr_snap_turn">VR: turn in steps (snap turn)</string>
     <string name="summary_vr_snap_turn">Past the edge angle the camera makes one quick 30 degree turn, and only turns again after you bring your head back toward the center, instead of spinning continuously. Easier on the stomach for some people.</string>
     <string name="title_vr_mouse_sync">VR: send mouse on every sensor sample</string>

@@ -6,9 +6,16 @@ package com.limelight.vr;
 //
 // `forward` positivo = frente, `side` positivo = direita (eixos do corpo, já calculados pelo ArPosition). Lados pedem
 // `sideFactor` vezes o limiar (a cabeça balança para os lados sem querer). Soltura em 60% do limiar (histerese).
+//
+// Saltos de pose: ao recuperar o rastreamento o ARCore pode reposicionar a câmera de uma vez (~0,3 m entre dois quadros, o
+// que a 30 fps seria 9 m/s). Isso não é movimento de gente: um salto maior que JUMP_M entre amostras seguidas apaga o histórico
+// e solta as teclas, em vez de virar um toque de W/S/A/D (visto nos logs de 2026-10-27: `saltos=1` e S+D de ~0,4 s).
 public class ArMotionKeys {
     private static final int CAPACITY = 128;
     private static final float RELEASE_FRACTION = 0.6f;
+    public static final float JUMP_M = 0.25f; // deslocamento entre duas amostras seguidas que não é de gente
+
+    public boolean jumped; // a última amostra foi um salto de pose
 
     private final float threshold;
     private final float sideThreshold;
@@ -36,6 +43,14 @@ public class ArMotionKeys {
     }
 
     public void update(float forward, float side, long nowNs) {
+        jumped = false;
+        if (size > 0) {
+            int last = (head + size - 1) % CAPACITY;
+            if (Math.hypot(forward - forwards[last], side - sides[last]) > JUMP_M) {
+                jumped = true;
+                reset();
+            }
+        }
         // Guarda a amostra
         int idx = (head + size) % CAPACITY;
         if (size == CAPACITY) {

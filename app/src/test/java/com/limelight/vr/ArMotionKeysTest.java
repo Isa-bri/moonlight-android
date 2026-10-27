@@ -92,4 +92,46 @@ public class ArMotionKeysTest {
         assertEquals(0f, keys.lastForwardDelta, 0f);
         assertFalse(keys.w || keys.d);
     }
+
+    @Test
+    public void saltoDePoseNaoViraToqueDeTecla() {
+        // Reproduz o que os logs de 2026-10-27 mostraram: parada, a pose salta ~0,3 m (recuperação do rastreamento)
+        // e depois volta de uma vez; nada disso é movimento de gente
+        for (int i = 0; i < 30; i++) frame(0.03f, 0f);
+        frame(0.31f, -0.21f);
+        assertTrue(keys.jumped);
+        assertFalse(keys.w || keys.s || keys.a || keys.d);
+        for (int i = 0; i < 30; i++) {
+            frame(0.31f, -0.21f);
+            assertFalse(keys.w || keys.a);
+        }
+        frame(0.03f, 0f); // volta de uma vez
+        assertTrue(keys.jumped);
+        assertFalse(keys.w || keys.s || keys.a || keys.d);
+        for (int i = 0; i < 30; i++) frame(0.03f, 0f);
+        assertFalse(keys.w || keys.s || keys.a || keys.d);
+    }
+
+    @Test
+    public void passoRapidoNormalNaoEConfundidoComSalto() {
+        float f = 0;
+        for (int i = 0; i < 30; i++) { // 1,5 m/s: 5 cm por quadro, bem abaixo dos 25 cm de salto
+            f += 0.05f;
+            frame(f, 0);
+            assertFalse(keys.jumped);
+        }
+        assertTrue(keys.w);
+    }
+
+    @Test
+    public void passoParaOLadoNaoAcionaWouS() {
+        // Passo lateral limpo como nos logs (frente varia ±2 cm): só D
+        float x = 0;
+        for (int i = 0; i < 30; i++) {
+            x += 0.02f;
+            frame(0.02f * (i % 2 == 0 ? 1 : -1), x);
+        }
+        assertTrue(keys.d);
+        assertFalse(keys.w || keys.s);
+    }
 }

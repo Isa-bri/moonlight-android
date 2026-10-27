@@ -33,6 +33,7 @@ import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
 import com.limelight.vr.HeadMouse;
 import com.limelight.vr.HeadStrafe;
+import com.limelight.vr.MoveStick;
 import com.limelight.vr.ArPosition;
 import com.limelight.vr.StepWalker;
 import com.limelight.vr.StereoGLView;
@@ -70,6 +71,7 @@ import android.os.Build;
 import android.util.Log;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.IBinder;
 import android.util.Rational;
 import android.view.Display;
@@ -143,6 +145,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private BroadcastReceiver mouseTestReceiver;
     private BroadcastReceiver headTestReceiver;
     private BroadcastReceiver logReceiver;
+    private BroadcastReceiver arTestReceiver;
+    private MoveStick moveStick;
     private boolean attemptedConnection = false;
     private int suppressPipRefCount = 0;
     private String pcName;
@@ -1356,7 +1360,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             requestPermissions(new String[]{android.Manifest.permission.CAMERA}, 4201);
             return;
         }
-        arPosition = new ArPosition(Game.this, conn, prefConfig.vrPositionDistance / 100f, prefConfig.vrPositionHold);
+        arPosition = new ArPosition(Game.this, conn, prefConfig.vrPositionDistance / 100f, prefConfig.vrPositionHold, moveStickOrNull());
         if (!arPosition.start()) {
             LimeLog.warning("ARCore indisponível: andar movendo o corpo desligado");
             arPosition = null;
@@ -2310,17 +2314,55 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     public void stageComplete(String stage) {
     }
 
+    // Destino do movimento do corpo quando a opção de analógico está ligada: o analógico esquerdo do controle 0 (ver
+    // ControllerHandler.setMotionStick). null = W/A/S/D. O envio é feito na thread principal, onde o ControllerHandler roda.
+    private MoveStick moveStickOrNull() {
+        if (!prefConfig.vrCinema || !prefConfig.vrMoveAnalog) {
+            return null;
+        }
+        if (moveStick == null) {
+            controllerHandler.setMotionStickEnabled(true);
+            final Handler main = new Handler(Looper.getMainLooper());
+            moveStick = (x, y) -> main.post(() -> controllerHandler.setMotionStick(x, y));
+        }
+        return moveStick;
+    }
+
+    // Teste sem andar: com o ARCore rodando, soma um deslocamento falso que cresce na velocidade pedida.
+    // adb shell am broadcast -a com.limelight.debug.DECKVR_AR_TEST --ef vf 0.8 --ef vs 0
+    private void registerArTest() {
+        if (arTestReceiver != null) {
+            return;
+        }
+        arTestReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                ArPosition position = arPosition;
+                if (position != null) {
+                    position.setTestVelocity(intent.getFloatExtra("vf", 0), intent.getFloatExtra("vs", 0));
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter("com.limelight.debug.DECKVR_AR_TEST");
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(arTestReceiver, filter, Context.RECEIVER_EXPORTED);
+        }
+        else {
+            registerReceiver(arTestReceiver, filter);
+        }
+    }
+
     // Uma linha com todas as opções VR em vigor: cada captura de log fica auto-explicativa
     private void logVrConfig() {
         if (!prefConfig.vrCinema) {
             return;
         }
         VrLog.i("CONFIG", "mouse=%b sens=%d vert=%d%% borda=%b borda_graus=%d passos_borda=%b mouse_sync=%b banda=%.1f passos=%b passos_limiar=%.1f lado=%b lado_graus=%d "
-                        + "ar=%b ar_joystick=%b ar_cm=%d ipd=%dmm k1=%.2f ca=%.2f tela=%dcm/%dcm cabeca_visual=%b res=%dx%d fps=%d",
+                        + "ar=%b ar_joystick=%b analogico=%b ar_cm=%d ipd=%dmm k1=%.2f ca=%.2f tela=%dcm/%dcm cabeca_visual=%b res=%dx%d fps=%d",
                 prefConfig.vrHeadMouse, prefConfig.vrHeadMouseSensitivity, prefConfig.vrHeadMousePitchPercent,
                 prefConfig.vrEdgeTurn, prefConfig.vrEdgeTurnAngle, prefConfig.vrSnapTurn, prefConfig.vrMouseSync,
                 prefConfig.vrWalkPitchBand / 10f, prefConfig.vrWalk, prefConfig.vrWalkThreshold / 10f, prefConfig.vrStrafe, prefConfig.vrStrafeAngle,
-                prefConfig.vrPosition, prefConfig.vrPositionHold, prefConfig.vrPositionDistance, prefConfig.vrIpdMm,
+                prefConfig.vrPosition, prefConfig.vrPositionHold, prefConfig.vrMoveAnalog, prefConfig.vrPositionDistance, prefConfig.vrIpdMm,
                 prefConfig.vrLensDistortion / 100f, prefConfig.vrChromatic / 100f,
                 prefConfig.vrScreenDistanceCm, prefConfig.vrScreenHeightCm, prefConfig.vrHeadTracking,
                 prefConfig.width, prefConfig.height, prefConfig.fps);
@@ -2450,6 +2492,15 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             if (logReceiver != null) {
                 unregisterReceiver(logReceiver);
                 logReceiver = null;
+            }
+            if (arTestReceiver != null) {
+                unregisterReceiver(arTestReceiver);
+                arTestReceiver = null;
+            }
+            if (moveStick != null) {
+                moveStick.setStick(0f, 0f);
+                moveStick = null;
+                controllerHandler.setMotionStickEnabled(false);
             }
             if (mouseTestReceiver != null) {
                 unregisterReceiver(mouseTestReceiver);
@@ -2662,6 +2713,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
                 logVrConfig();
                 registerLogControl();
+                registerArTest();
                 registerMouseLatencyTest();
                 registerHeadTest();
 
@@ -2678,7 +2730,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 }
 
                 if (prefConfig.vrCinema && prefConfig.vrWalk && stepWalker == null) {
-                    stepWalker = new StepWalker(Game.this, conn, prefConfig.vrWalkThreshold / 10f);
+                    stepWalker = new StepWalker(Game.this, conn, prefConfig.vrWalkThreshold / 10f, moveStickOrNull());
                     if (!stepWalker.start()) {
                         LimeLog.warning("Sem acelerômetro: andar no lugar indisponível");
                         stepWalker = null;

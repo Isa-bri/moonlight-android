@@ -27,6 +27,7 @@ public class StepWalker implements SensorEventListener {
     private final SensorManager sensorManager;
     private final NvConnection conn;
     private final float thresholdMs2;
+    private final MoveStick stickSink; // não nulo = andar vira o analógico para a frente (em vez da tecla W)
 
     private HandlerThread thread;
     private Handler handler;
@@ -44,7 +45,8 @@ public class StepWalker implements SensorEventListener {
     private int winSteps, winNearMiss;
     private float winMaxExcess;
 
-    public StepWalker(Context context, NvConnection conn, float thresholdMs2) {
+    public StepWalker(Context context, NvConnection conn, float thresholdMs2, MoveStick stickSink) {
+        this.stickSink = stickSink;
         this.sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         this.conn = conn;
         this.thresholdMs2 = thresholdMs2;
@@ -83,7 +85,12 @@ public class StepWalker implements SensorEventListener {
     private void releaseKey() {
         if (down) {
             down = false;
-            conn.sendKeyboardInput(KEY_W, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+            if (stickSink != null) {
+                stickSink.setStick(0f, 0f);
+            }
+            else {
+                conn.sendKeyboardInput(KEY_W, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+            }
             long now = System.nanoTime();
             long walked = Math.max(1, lastStepNsWall - walkStartNs);
             VrLog.i("PASSO", "W subiu passos=%d andou=%.1fs cadencia=%.2f passos/s (solta %dms depois do ultimo)",
@@ -103,8 +110,13 @@ public class StepWalker implements SensorEventListener {
                     down = true;
                     walkSteps = 0;
                     walkStartNs = lastStepNsWall;
-                    conn.sendKeyboardInput(KEY_W, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
-                    VrLog.i("PASSO", "W desceu (segundo passo seguido)");
+                    if (stickSink != null) {
+                        stickSink.setStick(0f, 1f);
+                    }
+                    else {
+                        conn.sendKeyboardInput(KEY_W, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+                    }
+                    VrLog.i("PASSO", "%s desceu (segundo passo seguido)", stickSink != null ? "analogico" : "W");
                 }
                 walkSteps++;
                 handler.removeCallbacks(release);
