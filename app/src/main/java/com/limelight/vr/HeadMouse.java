@@ -161,6 +161,7 @@ public class HeadMouse {
     public boolean togglePause() {
         toggledPause = !toggledPause;
         VrLog.i("VOL", "pausa %s", toggledPause ? "ligada" : "desligada");
+        VrTrace.volume(toggledPause ? "pausa_liga" : "pausa_desliga");
         return toggledPause;
     }
 
@@ -168,6 +169,7 @@ public class HeadMouse {
     public void setClutch(boolean held) {
         if (clutch != held) {
             VrLog.i("VOL", "embreagem %s", held ? "segurada" : "solta");
+            VrTrace.volume(held ? "embreagem_liga" : "embreagem_solta");
         }
         clutch = held;
     }
@@ -190,6 +192,12 @@ public class HeadMouse {
         float yaw = (float) Math.toDegrees(Math.atan2(gx, gy));
         float pitch = (float) Math.toDegrees(Math.asin(Math.max(-1f, Math.min(1f, gz))));
         float horizLen = (float) Math.hypot(gx, gy);
+
+        if (VrTrace.on()) {
+            WalkSource traceSource = walkSource;
+            VrTrace.hm(nowNs, yaw, pitch, horizLen, testWalking || (traceSource != null && traceSource.isWalking()),
+                    toggledPause || clutch);
+        }
 
         if (toggledPause || clutch) {
             if (pausedSinceNs == 0) {

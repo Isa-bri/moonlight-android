@@ -38,6 +38,8 @@ import com.limelight.vr.ArPosition;
 import com.limelight.vr.StepWalker;
 import com.limelight.vr.StereoGLView;
 import com.limelight.vr.VrLog;
+import com.limelight.vr.VrTrace;
+import com.limelight.vr.ReplayRunner;
 import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
 import com.limelight.utils.ShortcutHelper;
@@ -146,6 +148,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private BroadcastReceiver headTestReceiver;
     private BroadcastReceiver logReceiver;
     private BroadcastReceiver arTestReceiver;
+    private BroadcastReceiver traceReceiver;
+    private BroadcastReceiver replayReceiver;
+    private volatile boolean liveReplayRunning;
     private MoveStick moveStick;
     private boolean attemptedConnection = false;
     private int suppressPipRefCount = 0;
@@ -1483,6 +1488,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 if (arPosition != null) {
                     arPosition.recenter();
                 }
+                VrTrace.volume("recentrar");
                 VrLog.i("VOL", "volume baixo solto: centro redefinido (giro na borda%s)",
                         arPosition != null ? " e origem do ARCore" : "");
                 vibrateShort();
@@ -2352,6 +2358,178 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
     }
 
+    // Parâmetros em vigor, no formato que o ReplayRunner lê (cabeçalho `cfg` de um rastro)
+    private String traceConfig() {
+        return String.format(Locale.US,
+                "sens=%d;vert=%d;borda=%b;borda_graus=%d;passos_borda=%b;banda=%.1f;ar=%b;ar_cm=%d;ar_hold=%b;analogico=%b;passos=%b;passos_limiar=%.1f",
+                prefConfig.vrHeadMouseSensitivity, prefConfig.vrHeadMousePitchPercent, prefConfig.vrEdgeTurn,
+                prefConfig.vrEdgeTurnAngle, prefConfig.vrSnapTurn, prefConfig.vrWalkPitchBand / 10f, prefConfig.vrPosition,
+                prefConfig.vrPositionDistance, prefConfig.vrPositionHold, prefConfig.vrMoveAnalog, prefConfig.vrWalk,
+                prefConfig.vrWalkThreshold / 10f);
+    }
+
+    private static java.util.List<String> readLines(java.io.File f) throws java.io.IOException {
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(
+                new java.io.FileInputStream(f), java.nio.charset.StandardCharsets.UTF_8))) {
+            String l;
+            while ((l = r.readLine()) != null) {
+                lines.add(l);
+            }
+        }
+        return lines;
+    }
+
+    // Gravação de rastros e replay (fork DeckVR). Os arquivos ficam em files/ do app (lidos com `run-as ... cat`):
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_TRACE --es acao start --es nome casa1
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_TRACE --es acao mark --es rotulo parada
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_TRACE --es acao stop
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_REPLAY            (confere todos os files/replay/*.csv com *.regras)
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_REPLAY --es caso casa1 --ez live true   (toca ao vivo no stream)
+    private void registerTraceAndReplay() {
+        if (traceReceiver != null) {
+            return;
+        }
+        traceReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String acao = intent.getStringExtra("acao");
+                if ("start".equals(acao)) {
+                    String nome = intent.getStringExtra("nome");
+                    java.io.File f = new java.io.File(getFilesDir(), "traces/" + (nome != null ? nome : "rastro") + ".csv");
+                    boolean ok = VrTrace.start(f, traceConfig());
+                    Log.i(VrLog.TAG, "TRACE iniciado ok=" + ok + " arquivo=" + f.getName());
+                }
+                else if ("stop".equals(acao)) {
+                    int dropped = VrTrace.dropped();
+                    VrTrace.stop();
+                    Log.i(VrLog.TAG, "TRACE parou descartadas=" + dropped);
+                }
+                else if ("mark".equals(acao)) {
+                    VrTrace.mark(String.valueOf(intent.getStringExtra("rotulo")));
+                }
+            }
+        };
+        replayReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, final Intent intent) {
+                new Thread(() -> runReplay(intent), "DeckVR-Replay").start();
+            }
+        };
+        int flags = Build.VERSION.SDK_INT >= 33 ? Context.RECEIVER_EXPORTED : 0;
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(traceReceiver, new IntentFilter("com.limelight.debug.DECKVR_TRACE"), flags);
+            registerReceiver(replayReceiver, new IntentFilter("com.limelight.debug.DECKVR_REPLAY"), flags);
+        }
+        else {
+            registerReceiver(traceReceiver, new IntentFilter("com.limelight.debug.DECKVR_TRACE"));
+            registerReceiver(replayReceiver, new IntentFilter("com.limelight.debug.DECKVR_REPLAY"));
+        }
+    }
+
+    private void runReplay(Intent intent) {
+        String dirName = intent.getStringExtra("dir");
+        java.io.File dir = dirName != null ? new java.io.File(dirName) : new java.io.File(getFilesDir(), "replay");
+        String caso = intent.getStringExtra("caso");
+        boolean live = intent.getBooleanExtra("live", false);
+        java.io.File[] files = dir.listFiles((d, name) -> name.endsWith(".csv") && (caso == null || name.equals(caso + ".csv")));
+        if (files == null || files.length == 0) {
+            Log.w(VrLog.TAG, "REPLAY nenhum rastro em " + dir + (caso != null ? " para o caso " + caso : ""));
+            return;
+        }
+        java.util.Arrays.sort(files);
+        if (live) {
+            runLiveReplay(files[0]);
+            return;
+        }
+        int passou = 0, falhou = 0;
+        for (java.io.File csv : files) {
+            String base = csv.getName().substring(0, csv.getName().length() - 4);
+            try {
+                java.io.File regras = new java.io.File(dir, base + ".regras");
+                if (!regras.exists()) {
+                    Log.w(VrLog.TAG, "REPLAY caso=" + base + " FALHOU sem arquivo de regras (" + regras.getName() + "): nada conferido");
+                    falhou++;
+                    continue;
+                }
+                ReplayRunner.Result r = ReplayRunner.run(base, readLines(csv), readLines(regras));
+                for (String l : r.lines) {
+                    Log.i(VrLog.TAG, "REPLAY caso=" + base + " " + l);
+                }
+                Log.i(VrLog.TAG, "REPLAY caso=" + base + " " + (r.passed() ? "PASSOU" : "FALHOU") + " conferidas=" + r.checked + " falhas=" + r.failed);
+                if (r.passed()) passou++; else falhou++;
+            } catch (Throwable t) {
+                Log.e(VrLog.TAG, "REPLAY caso=" + base + " FALHOU erro: " + t);
+                falhou++;
+            }
+        }
+        Log.i(VrLog.TAG, "REPLAY resumo passou=" + passou + " falhou=" + falhou);
+    }
+
+    // Toca o rastro no stream aberto, no ritmo gravado, mandando as saídas para o caminho real (teclas, mouse, analógico).
+    // Recusa se o movimento real do corpo estiver ligado (ARCore/andar no lugar): os dois se misturariam.
+    private void runLiveReplay(java.io.File csv) {
+        if (liveReplayRunning) {
+            Log.w(VrLog.TAG, "REPLAY ao vivo ja esta rodando");
+            return;
+        }
+        if (arPosition != null || stepWalker != null || !connected) {
+            Log.w(VrLog.TAG, "REPLAY ao vivo recusado: precisa de stream aberto e sem ARCore/andar no lugar ligados");
+            return;
+        }
+        final MoveStick stickOut = moveStickOrNull();
+        liveReplayRunning = true;
+        Log.i(VrLog.TAG, "REPLAY ao vivo iniciando caso=" + csv.getName());
+        try {
+            final long wallStart = System.nanoTime();
+            ReplayRunner.Sink sink = new ReplayRunner.Sink() {
+                @Override
+                public void key(char key, boolean down) {
+                    short code = key == 'W' ? (short) 0x8057 : key == 'S' ? (short) 0x8053 : key == 'A' ? (short) 0x8041 : (short) 0x8044;
+                    conn.sendKeyboardInput(code, down ? KeyboardPacket.KEY_DOWN : KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+                }
+
+                @Override
+                public void stick(float x, float y) {
+                    if (stickOut != null) {
+                        stickOut.setStick(x, y);
+                    }
+                }
+
+                @Override
+                public void mouse(int dx, int dy) {
+                    conn.sendMouseMove((short) Math.max(-32768, Math.min(32767, dx)), (short) Math.max(-32768, Math.min(32767, dy)));
+                }
+            };
+            ReplayRunner.Pacer pacer = new ReplayRunner.Pacer() {
+                @Override
+                public void waitUntil(long relativeMs) {
+                    long waitMs = relativeMs - (System.nanoTime() - wallStart) / 1_000_000L;
+                    if (waitMs > 0) {
+                        try {
+                            Thread.sleep(waitMs);
+                        } catch (InterruptedException ignored) {
+                        }
+                    }
+                }
+            };
+            ReplayRunner.playLive(readLines(csv), sink, pacer);
+        } catch (Throwable t) {
+            Log.e(VrLog.TAG, "REPLAY ao vivo erro: " + t);
+        } finally {
+            // Termina sempre solto: nenhuma tecla/analógico preso no Deck por causa de um replay interrompido
+            for (char k : new char[]{'W', 'A', 'S', 'D'}) {
+                short code = k == 'W' ? (short) 0x8057 : k == 'S' ? (short) 0x8053 : k == 'A' ? (short) 0x8041 : (short) 0x8044;
+                conn.sendKeyboardInput(code, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+            }
+            if (stickOut != null) {
+                stickOut.setStick(0f, 0f);
+            }
+            liveReplayRunning = false;
+            Log.i(VrLog.TAG, "REPLAY ao vivo terminou caso=" + csv.getName());
+        }
+    }
+
     // Uma linha com todas as opções VR em vigor: cada captura de log fica auto-explicativa
     private void logVrConfig() {
         if (!prefConfig.vrCinema) {
@@ -2496,6 +2674,15 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             if (arTestReceiver != null) {
                 unregisterReceiver(arTestReceiver);
                 arTestReceiver = null;
+            }
+            if (traceReceiver != null) {
+                VrTrace.stop();
+                unregisterReceiver(traceReceiver);
+                traceReceiver = null;
+            }
+            if (replayReceiver != null) {
+                unregisterReceiver(replayReceiver);
+                replayReceiver = null;
             }
             if (moveStick != null) {
                 moveStick.setStick(0f, 0f);
@@ -2714,6 +2901,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 logVrConfig();
                 registerLogControl();
                 registerArTest();
+                registerTraceAndReplay();
                 registerMouseLatencyTest();
                 registerHeadTest();
 

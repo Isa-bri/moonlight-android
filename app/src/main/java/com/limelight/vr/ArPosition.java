@@ -25,19 +25,17 @@ import com.limelight.nvstream.input.KeyboardPacket;
 import java.util.EnumSet;
 import java.util.List;
 
-// Posição da cabeça pelo ARCore (câmera traseira + sensores) como joystick: o deslocamento do ponto de origem,
-// medido nos eixos do corpo (a direção do olhar quando a origem foi definida), segura W/S (frente/trás) e A/D (direita/esquerda). Dar um passo para trás segura S.
-// Voltar ao ponto de origem solta as teclas. recenter() move a origem para onde a cabeça está agora.
+// Posição da cabeça pelo ARCore (câmera traseira + sensores) para andar de verdade: a lógica (eixos do corpo, recentrar, salto de
+// pose, modos "só enquanto se move", joystick e analógico) está em ArPipeline, sem Android; esta classe cuida da sessão do ARCore,
+// do envio das teclas e do log. recenter() move a origem para onde a cabeça está agora.
 //
-// Diagnóstico (VrLog, linhas AR): quadros/s e maior intervalo entre quadros (o ARCore a 30 fps; atraso aqui é atraso do
-// andar), deslocamento frente/lado mínimo e máximo por segundo, cada tecla que desce/sobe com o deslocamento do momento
-// e quanto tempo ficou segurada, perdas de rastreamento com a duração, saltos de pose entre quadros seguidos (reposição
-// do ARCore, que dispara tecla falsa) e a deriva da origem a cada recentrada.
+// Diagnóstico (VrLog, linhas AR): quadros/s e maior intervalo entre quadros, deslocamento frente/lado mínimo e máximo por segundo,
+// cada tecla que desce/sobe com o deslocamento do momento e quanto tempo ficou segurada, perdas de rastreamento com a duração,
+// saltos de pose entre quadros seguidos e a deriva da origem a cada recentrada.
 //
 // O ARCore precisa de uma textura OES para a imagem da câmera, então esta classe tem o próprio contexto EGL
 // (superfície 1x1) numa thread dedicada, sem relação com o StereoGLView.
 public class ArPosition {
-    private static final float JUMP_M = 0.25f;     // salto de pose entre dois quadros que não é movimento de gente
     private static final long LOG_WINDOW_MS = 1000;
 
     private static final short KEY_W = (short) 0x8057;
@@ -45,60 +43,51 @@ public class ArPosition {
     private static final short KEY_S = (short) 0x8053;
     private static final short KEY_D = (short) 0x8044;
 
-    private static final float SIDE_FACTOR = 2f;
-    private static final long MOTION_WINDOW_NS = 500_000_000L; // modo "só enquanto se move": deslocamento nos últimos 0,5 s
-
     private final Context context;
     private final NvConnection conn;
     private final float thresholdM;
-    private final float releaseM;
-    private final float sideThresholdM;
-    private final float sideReleaseM;
     private final boolean holdMode; // true = joystick (segura enquanto longe da origem); false = só enquanto se move
-    private final ArMotionKeys motion;
-    private final MoveStick stickSink;     // não nulo = movimento vira analógico esquerdo em vez de W/A/S/D
-    private final ArMotionStick stick;
-    private float lastStickX, lastStickY;
-    private volatile boolean stickWalking;
-    private float lastStickLogX, lastStickLogY;
+    private final MoveStick stickSink; // não nulo = movimento vira analógico esquerdo em vez de W/A/S/D
+    private final ArPipeline pipeline;
 
-    // Só para testes por broadcast: soma ao deslocamento medido um deslocamento que cresce na velocidade pedida (m/s)
+    // Só para testes por broadcast: soma ao deslocamento medido um deslocamento que cresce na velocidade pedida (m/s);
+    // enquanto ativo, o rastreamento perdido não atrapalha (usa a última pose), para o teste não depender da câmera enxergar algo
     private volatile float testVF, testVS;
-    private float testF, testS;
+    private volatile boolean testActive;
     private long lastTestNs;
+    private float lastX, lastZ, lastHx, lastHz = -1;
 
     private Thread thread;
     private volatile boolean running;
-    private volatile boolean recenterRequested = true;
 
-    // Só usados pela thread do ARCore
-    private volatile boolean fwdHeld, backHeld, leftHeld, rightHeld;
     private long lastLog;
 
     // Diagnóstico, só na thread do ARCore
-    private float curForward, curSide;
     private long heldFwdNs, heldBackNs, heldLeftNs, heldRightNs;
     private long lostSinceNs;
     private long lastFrameNs, winMaxGapNs;
     private int winFrames, winLost, winJumps;
     private float winMinFwd = Float.MAX_VALUE, winMaxFwd = -Float.MAX_VALUE;
     private float winMinSide = Float.MAX_VALUE, winMaxSide = -Float.MAX_VALUE;
-    private float prevX, prevZ;
-    private boolean hasPrevPose;
     private long lastPoseNs;
 
     public ArPosition(Context context, NvConnection conn, float thresholdM, boolean holdMode, MoveStick stickSink) {
         this.context = context;
         this.conn = conn;
+        this.thresholdM = thresholdM;
         this.holdMode = holdMode;
         this.stickSink = stickSink;
-        this.stick = new ArMotionStick(thresholdM, thresholdM * 4f, MOTION_WINDOW_NS);
-        this.motion = new ArMotionKeys(thresholdM, SIDE_FACTOR, MOTION_WINDOW_NS);
-        this.thresholdM = thresholdM;
-        this.releaseM = thresholdM * 0.6f; // histerese
-        // Os lados pedem mais deslocamento: a cabeça balança para os lados sem querer
-        this.sideThresholdM = thresholdM * SIDE_FACTOR;
-        this.sideReleaseM = sideThresholdM * 0.6f;
+        this.pipeline = new ArPipeline(thresholdM, holdMode, stickSink != null, new MoveOutput() {
+            @Override
+            public void key(char key, boolean down) {
+                sendKey(key, down);
+            }
+
+            @Override
+            public void stick(float x, float y) {
+                ArPosition.this.stickSink.setStick(x, y);
+            }
+        });
     }
 
     public boolean start() {
@@ -124,18 +113,19 @@ public class ArPosition {
     }
 
     public boolean isWalking() {
-        return fwdHeld || backHeld || leftHeld || rightHeld || stickWalking;
+        return pipeline.isWalking();
     }
 
     // Teste por broadcast: velocidade falsa (m/s) para a frente e para a direita; 0,0 para de crescer (o deslocamento fica)
     public void setTestVelocity(float forwardMps, float sideMps) {
         testVF = forwardMps;
         testVS = sideMps;
+        testActive = true;
     }
 
     // A próxima leitura vira a origem
     public void recenter() {
-        recenterRequested = true;
+        pipeline.requestRecenter();
     }
 
     private void run() {
@@ -189,13 +179,11 @@ public class ArPosition {
             session.setCameraTextureName(tex[0]);
             session.setDisplayGeometry(Surface.ROTATION_90, 1, 1);
             session.resume();
-            VrLog.i("AR", "iniciado modo=%s limiar=%.0fcm lado=%.0fcm soltura=%.0f%% resolucao=%s",
-                    stickSink != null ? "analogico" : holdMode ? "joystick(segura longe da origem)" : "so_enquanto_se_move", thresholdM * 100, sideThresholdM * 100, releaseM / thresholdM * 100,
+            VrLog.i("AR", "iniciado modo=%s limiar=%.0fcm lado=%.0fcm resolucao=%s",
+                    stickSink != null ? "analogico" : holdMode ? "joystick(segura longe da origem)" : "so_enquanto_se_move",
+                    thresholdM * 100, thresholdM * ArPipeline.SIDE_FACTOR * 100,
                     smallest != null ? smallest.getImageSize().getWidth() + "x" + smallest.getImageSize().getHeight() : "?");
 
-            float originX = 0, originZ = 0;
-            float fwdX = 0, fwdZ = -1;       // olhar atual
-            float bodyX = 0, bodyZ = -1;     // frente do corpo, fixada na origem
             TrackingState last = null;
             while (running) {
                 Frame frame = session.update();
@@ -207,9 +195,10 @@ public class ArPosition {
                 winFrames++;
                 com.google.ar.core.Camera camera = frame.getCamera();
                 TrackingState state = camera.getTrackingState();
+                boolean tracking = state == TrackingState.TRACKING;
                 if (state != last) {
                     VrLog.w("AR", "rastreamento %s motivo=%s", state, camera.getTrackingFailureReason());
-                    if (state == TrackingState.TRACKING) {
+                    if (tracking) {
                         if (lostSinceNs != 0) {
                             VrLog.i("AR", "rastreamento voltou apos %.1fs", (frameNs - lostSinceNs) / 1e9);
                         }
@@ -221,108 +210,57 @@ public class ArPosition {
                     }
                     last = state;
                 }
-                if (state != TrackingState.TRACKING) {
-                    hasPrevPose = false;
-                    motion.reset();
-                    releaseAll("rastreamento perdido");
-                    logWindow();
-                    continue;
-                }
 
-                Pose pose = camera.getPose();
-                float x = pose.tx();
-                float z = pose.tz();
-                boolean poseJumped = false;
-                if (hasPrevPose && Math.hypot(x - prevX, z - prevZ) > JUMP_M) {
-                    winJumps++;
-                    poseJumped = true;
-                    VrLog.w("AR", "salto de pose %.2fm entre quadros (%.0fms): ignorado, sem tecla", Math.hypot(x - prevX, z - prevZ),
-                            (frameNs - lastPoseNs) / 1e6);
-                    // A origem acompanha o salto, então o deslocamento fica contínuo (vale para o modo joystick)
-                    originX += x - prevX;
-                    originZ += z - prevZ;
-                }
-                prevX = x;
-                prevZ = z;
-                lastPoseNs = frameNs;
-                hasPrevPose = true;
-                float[] zAxis = pose.getZAxis(); // sai da tela; o olhar é -Z
-                float hx = -zAxis[0], hz = -zAxis[2];
-                float hLen = (float) Math.hypot(hx, hz);
-                if (hLen > 0.3f) { // olhando quase reto para cima/baixo: mantém a última frente
-                    fwdX = hx / hLen;
-                    fwdZ = hz / hLen;
-                }
-
-                if (recenterRequested) {
-                    recenterRequested = false;
-                    // Quanto a origem antiga estava longe de onde a cabeça foi parar: é a deriva (ou o deslocamento real)
-                    // que a recentrada corrige; um S ou A preso costuma vir daqui
-                    VrLog.i("AR", "recentrou deslocamento_antes frente=%+.2fm lado=%+.2fm", curForward, curSide);
-                    originX = x;
-                    originZ = z;
-                    bodyX = fwdX;
-                    bodyZ = fwdZ;
-                    motion.reset();
-                    testF = testS = 0;
-                    releaseAll("recentrou");
-                }
-
-                float dx = x - originX, dz = z - originZ;
-                // direita = (-bodyZ, bodyX) no sistema do ARCore (Y para cima, olhando para -Z)
-                float forward = dx * bodyX + dz * bodyZ;
-                float side = dx * -bodyZ + dz * bodyX;
-                if (lastTestNs != 0) {
-                    float dtTest = (frameNs - lastTestNs) / 1e9f;
-                    testF += testVF * dtTest;
-                    testS += testVS * dtTest;
-                }
-                lastTestNs = frameNs;
-                forward += testF;
-                side += testS;
-
-                curForward = forward;
-                curSide = side;
-                winMinFwd = Math.min(winMinFwd, forward);
-                winMaxFwd = Math.max(winMaxFwd, forward);
-                winMinSide = Math.min(winMinSide, side);
-                winMaxSide = Math.max(winMaxSide, side);
-
-                if (stickSink != null) {
-                    if (poseJumped) {
-                        stick.reset();
-                    }
-                    else {
-                        stick.update(forward, side, frameNs);
-                    }
-                    sendStick(stick.x, stick.y);
-                    logWindow();
-                    continue;
-                }
-
-                boolean wantFwd, wantBack, wantRight, wantLeft;
-                if (poseJumped) {
-                    motion.reset();
-                    wantFwd = wantBack = wantRight = wantLeft = false;
-                }
-                else if (holdMode) {
-                    wantFwd = hold(fwdHeld, forward);
-                    wantBack = hold(backHeld, -forward);
-                    wantRight = holdSide(rightHeld, side);
-                    wantLeft = holdSide(leftHeld, -side);
+                float x, z, hx, hz;
+                if (tracking) {
+                    Pose pose = camera.getPose();
+                    x = pose.tx();
+                    z = pose.tz();
+                    float[] zAxis = pose.getZAxis(); // sai da tela; o olhar é -Z
+                    hx = -zAxis[0];
+                    hz = -zAxis[2];
+                    lastX = x;
+                    lastZ = z;
+                    lastHx = hx;
+                    lastHz = hz;
                 }
                 else {
-                    motion.update(forward, side, frameNs);
-                    wantFwd = motion.w;
-                    wantBack = motion.s;
-                    wantRight = motion.d;
-                    wantLeft = motion.a;
+                    x = lastX;
+                    z = lastZ;
+                    hx = lastHx;
+                    hz = lastHz;
                 }
-                fwdHeld = key(KEY_W, fwdHeld, wantFwd);
-                backHeld = key(KEY_S, backHeld, wantBack);
-                rightHeld = key(KEY_D, rightHeld, wantRight);
-                leftHeld = key(KEY_A, leftHeld, wantLeft);
+                VrTrace.ar(frameNs, x, z, hx, hz, tracking);
+                // Em teste, o rastreamento perdido é ignorado (a câmera pode estar de frente para uma mesa vazia)
+                boolean effective = tracking || testActive;
 
+                if (lastTestNs != 0 && testActive) {
+                    float dt = (frameNs - lastTestNs) / 1e9f;
+                    pipeline.testForward += testVF * dt;
+                    pipeline.testSide += testVS * dt;
+                }
+                lastTestNs = frameNs;
+
+                pipeline.onFrame(frameNs, x, z, hx, hz, effective);
+                if (!effective) {
+                    logWindow();
+                    continue;
+                }
+                if (pipeline.recentered) {
+                    // Quanto a origem antiga estava longe de onde a cabeça foi parar: é a deriva (ou o deslocamento real)
+                    VrLog.i("AR", "recentrou deslocamento_antes frente=%+.2fm lado=%+.2fm",
+                            pipeline.recenterBeforeForward, pipeline.recenterBeforeSide);
+                }
+                if (pipeline.poseJumped) {
+                    winJumps++;
+                    VrLog.w("AR", "salto de pose entre quadros (%.0fms): ignorado, sem tecla", (frameNs - lastPoseNs) / 1e6);
+                }
+                lastPoseNs = frameNs;
+
+                winMinFwd = Math.min(winMinFwd, pipeline.curForward);
+                winMaxFwd = Math.max(winMaxFwd, pipeline.curForward);
+                winMinSide = Math.min(winMinSide, pipeline.curSide);
+                winMaxSide = Math.max(winMaxSide, pipeline.curSide);
                 logWindow();
             }
         } catch (Throwable t) {
@@ -330,7 +268,7 @@ public class ArPosition {
                 Log.e(VrLog.TAG, "AR ARCore falhou", t);
             }
         } finally {
-            releaseAll("encerrando");
+            pipeline.releaseAll();
             if (session != null) {
                 try {
                     session.close();
@@ -348,74 +286,28 @@ public class ArPosition {
         }
     }
 
-    // Liga acima do limiar; desliga só abaixo do limiar de soltura
-    private boolean hold(boolean held, float offset) {
-        return held ? offset > releaseM : offset > thresholdM;
-    }
-
-    private boolean holdSide(boolean held, float offset) {
-        return held ? offset > sideReleaseM : offset > sideThresholdM;
-    }
-
-    private boolean key(short code, boolean was, boolean want) {
-        if (want != was) {
-            conn.sendKeyboardInput(code, want ? KeyboardPacket.KEY_DOWN : KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
-            long now = System.nanoTime();
-            if (want) {
-                setHeldSince(code, now);
-                VrLog.i("AR", "%s desceu frente=%+.2fm lado=%+.2fm", keyName(code), curForward, curSide);
-            }
-            else {
-                VrLog.i("AR", "%s subiu frente=%+.2fm lado=%+.2fm segurou=%.1fs", keyName(code), curForward, curSide,
-                        (now - heldSince(code)) / 1e9);
-            }
+    private void sendKey(char key, boolean down) {
+        short code = key == 'W' ? KEY_W : key == 'S' ? KEY_S : key == 'A' ? KEY_A : KEY_D;
+        conn.sendKeyboardInput(code, down ? KeyboardPacket.KEY_DOWN : KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+        long now = System.nanoTime();
+        if (down) {
+            setHeldSince(key, now);
+            VrLog.i("AR", "%c desceu frente=%+.2fm lado=%+.2fm", key, pipeline.curForward, pipeline.curSide);
         }
-        return want;
-    }
-
-    // Manda o analógico quando muda o bastante (1/256) e sempre que volta a zero
-    private void sendStick(float x, float y) {
-        boolean zero = x == 0 && y == 0;
-        if (zero ? (lastStickX == 0 && lastStickY == 0)
-                : Math.abs(x - lastStickX) < 1 / 256f && Math.abs(y - lastStickY) < 1 / 256f) {
-            return;
+        else {
+            VrLog.i("AR", "%c subiu frente=%+.2fm lado=%+.2fm segurou=%.1fs", key, pipeline.curForward, pipeline.curSide,
+                    (now - heldSince(key)) / 1e9);
         }
-        lastStickX = x;
-        lastStickY = y;
-        stickWalking = Math.hypot(x, y) > 0.1;
-        stickSink.setStick(x, y);
     }
 
-    private void releaseAll(String why) {
-        if (stickSink != null) {
-            if (lastStickX != 0 || lastStickY != 0) {
-                VrLog.i("AR", "analogico zerado: %s", why);
-            }
-            stick.reset();
-            sendStick(0f, 0f);
-            return;
-        }
-        if (isWalking()) {
-            VrLog.i("AR", "soltando tudo: %s", why);
-        }
-        fwdHeld = key(KEY_W, fwdHeld, false);
-        backHeld = key(KEY_S, backHeld, false);
-        rightHeld = key(KEY_D, rightHeld, false);
-        leftHeld = key(KEY_A, leftHeld, false);
+    private long heldSince(char key) {
+        return key == 'W' ? heldFwdNs : key == 'S' ? heldBackNs : key == 'A' ? heldLeftNs : heldRightNs;
     }
 
-    private static String keyName(short code) {
-        return code == KEY_W ? "W" : code == KEY_S ? "S" : code == KEY_A ? "A" : "D";
-    }
-
-    private long heldSince(short code) {
-        return code == KEY_W ? heldFwdNs : code == KEY_S ? heldBackNs : code == KEY_A ? heldLeftNs : heldRightNs;
-    }
-
-    private void setHeldSince(short code, long ns) {
-        if (code == KEY_W) heldFwdNs = ns;
-        else if (code == KEY_S) heldBackNs = ns;
-        else if (code == KEY_A) heldLeftNs = ns;
+    private void setHeldSince(char key, long ns) {
+        if (key == 'W') heldFwdNs = ns;
+        else if (key == 'S') heldBackNs = ns;
+        else if (key == 'A') heldLeftNs = ns;
         else heldRightNs = ns;
     }
 
@@ -432,8 +324,8 @@ public class ArPosition {
                 winFrames * 1000.0 / (now - lastLog), winMaxGapNs / 1e6,
                 winMinFwd == Float.MAX_VALUE ? 0f : winMinFwd, winMaxFwd == -Float.MAX_VALUE ? 0f : winMaxFwd,
                 winMinSide == Float.MAX_VALUE ? 0f : winMinSide, winMaxSide == -Float.MAX_VALUE ? 0f : winMaxSide,
-                fwdHeld ? "W" : "", backHeld ? "S" : "", leftHeld ? "A" : "", rightHeld ? "D" : "",
-                lastStickX, lastStickY, winLost, winJumps);
+                pipeline.fwdHeld ? "W" : "", pipeline.backHeld ? "S" : "", pipeline.leftHeld ? "A" : "", pipeline.rightHeld ? "D" : "",
+                pipeline.stickX, pipeline.stickY, winLost, winJumps);
         lastLog = now;
         winFrames = winLost = winJumps = 0;
         winMaxGapNs = 0;
