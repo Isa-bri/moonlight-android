@@ -18,6 +18,8 @@ import android.preference.PreferenceCategory;
 import android.preference.PreferenceFragment;
 import android.preference.PreferenceManager;
 import android.preference.PreferenceScreen;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.DisplayMetrics;
 import android.util.Range;
 import android.view.Display;
@@ -26,6 +28,8 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.widget.EditText;
+import android.widget.ListView;
 
 import com.limelight.LimeLog;
 import com.limelight.PcView;
@@ -35,7 +39,13 @@ import com.limelight.utils.Dialog;
 import com.limelight.utils.UiHelper;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public class StreamSettings extends Activity {
     private PreferenceConfiguration previousPrefs;
@@ -266,8 +276,118 @@ public class StreamSettings extends Activity {
         @Override
         public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
             View view = super.onCreateView(inflater, container, savedInstanceState);
-            UiHelper.applyStatusBarPadding(view);
+
+            // O padding da barra de navegação vai na própria lista (e não na raiz do fragmento)
+            // para a lista rolar até o fim sem ficar atrás da barra
+            ListView list = view.findViewById(android.R.id.list);
+            list.setClipToPadding(false);
+            // O listener de insets não chega até a lista nesta tela, então lemos os insets da
+            // janela direto quando a lista entra na tela
+            list.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+                @Override
+                public void onViewAttachedToWindow(View v) {
+                    v.post(() -> {
+                        WindowInsets insets = v.getRootWindowInsets();
+                        if (insets != null) {
+                            v.setPadding(v.getPaddingLeft(), v.getPaddingTop(), v.getPaddingRight(),
+                                    Math.max(insets.getTappableElementInsets().bottom,
+                                            insets.getStableInsetBottom()));
+                        }
+                    });
+                }
+
+                @Override
+                public void onViewDetachedFromWindow(View v) {}
+            });
+
+            // Barra de pesquisa acima da lista
+            ViewGroup searchParent = (ViewGroup) list.getParent().getParent();
+            EditText search = (EditText) inflater.inflate(R.layout.settings_search_box, searchParent, false);
+            search.addTextChangedListener(new TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+                @Override
+                public void afterTextChanged(Editable s) {
+                    filterPreferences(s.toString());
+                }
+            });
+            searchParent.addView(search, 0);
+
             return view;
+        }
+
+        // Categorias e preferências como carregadas do XML (já com os ajustes do onCreate)
+        private final List<PreferenceCategory> allCategories = new ArrayList<>();
+        private final Map<PreferenceCategory, List<Preference>> allChildren = new HashMap<>();
+
+        private void snapshotPreferences() {
+            PreferenceScreen screen = getPreferenceScreen();
+            for (int i = 0; i < screen.getPreferenceCount(); i++) {
+                Preference p = screen.getPreference(i);
+                if (p instanceof PreferenceCategory) {
+                    PreferenceCategory category = (PreferenceCategory) p;
+                    List<Preference> children = new ArrayList<>();
+                    for (int j = 0; j < category.getPreferenceCount(); j++) {
+                        children.add(category.getPreference(j));
+                    }
+                    allCategories.add(category);
+                    allChildren.put(category, children);
+                }
+            }
+        }
+
+        private static boolean matches(CharSequence text, String query) {
+            return text != null && text.toString().toLowerCase().contains(query);
+        }
+
+        private void filterPreferences(String rawQuery) {
+            String query = rawQuery.trim().toLowerCase();
+            PreferenceScreen screen = getPreferenceScreen();
+
+            // Primeiro decide o que aparece; categoria que bate mostra todas as suas opções
+            Set<Preference> shown = new HashSet<>();
+            Map<String, Preference> byKey = new HashMap<>();
+            for (PreferenceCategory category : allCategories) {
+                boolean categoryMatches = query.isEmpty() || matches(category.getTitle(), query);
+                for (Preference pref : allChildren.get(category)) {
+                    if (pref.getKey() != null) {
+                        byKey.put(pref.getKey(), pref);
+                    }
+                    if (categoryMatches || matches(pref.getTitle(), query) || matches(pref.getSummary(), query)) {
+                        shown.add(pref);
+                    }
+                }
+            }
+
+            // O Android não deixa religar uma opção cuja dependência está fora da tela,
+            // então as dependências (e as delas) entram junto
+            List<Preference> pending = new ArrayList<>(shown);
+            while (!pending.isEmpty()) {
+                Preference dependency = byKey.get(pending.remove(pending.size() - 1).getDependency());
+                if (dependency != null && shown.add(dependency)) {
+                    pending.add(dependency);
+                }
+            }
+
+            screen.removeAll();
+            for (PreferenceCategory category : allCategories) {
+                category.removeAll();
+
+                boolean any = false;
+                for (Preference pref : allChildren.get(category)) {
+                    if (shown.contains(pref)) {
+                        if (!any) {
+                            screen.addPreference(category);
+                            any = true;
+                        }
+                        category.addPreference(pref);
+                    }
+                }
+            }
         }
 
         @Override
@@ -667,6 +787,8 @@ public class StreamSettings extends Activity {
                     return true;
                 }
             });
+
+            snapshotPreferences();
         }
     }
 }

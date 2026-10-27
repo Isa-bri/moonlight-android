@@ -31,6 +31,7 @@ import com.limelight.preferences.GlPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
+import com.limelight.vr.StereoGLView;
 import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
 import com.limelight.utils.ShortcutHelper;
@@ -123,6 +124,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private boolean connected = false;
     private boolean autoEnterPip = false;
     private boolean surfaceCreated = false;
+    private boolean vrConnectionStarted = false;
     private boolean attemptedConnection = false;
     private int suppressPipRefCount = 0;
     private String pcName;
@@ -2514,9 +2516,29 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             // Update GameManager state to indicate we're "loading" while connecting
             UiHelper.notifyStreamConnecting(Game.this);
 
-            decoderRenderer.setRenderTarget(holder);
-            conn.start(new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx),
-                    decoderRenderer, Game.this);
+            if (prefConfig.vrCinema) {
+                // O StreamView continua por baixo (ciclo de vida e entrada); o vídeo
+                // vai para a StereoGLView, que só inicia a conexão quando tem Surface
+                StereoGLView stereoView = new StereoGLView(this, prefConfig.width, prefConfig.height, prefConfig.enablePerfOverlay,
+                        surface -> runOnUiThread(() -> {
+                            if (vrConnectionStarted) {
+                                LimeLog.warning("Contexto GL recriado; a Surface do VR não foi religada ao decodificador");
+                                return;
+                            }
+                            vrConnectionStarted = true;
+                            decoderRenderer.setRenderTarget(surface);
+                            conn.start(new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx),
+                                    decoderRenderer, Game.this);
+                        }));
+                ((FrameLayout) streamView.getParent()).addView(stereoView,
+                        new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT));
+            }
+            else {
+                decoderRenderer.setRenderTarget(holder);
+                conn.start(new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx),
+                        decoderRenderer, Game.this);
+            }
         }
     }
 

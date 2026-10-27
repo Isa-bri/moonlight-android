@@ -107,7 +107,10 @@ public class UiHelper {
                     view.setPadding(view.getPaddingLeft(),
                             view.getPaddingTop(),
                             view.getPaddingRight(),
-                            windowInsets.getTappableElementInsets().bottom);
+                            // O inset "tappable" some em alguns modos de navegação e a barra
+                            // acaba cobrindo o fim da lista; o inset estável nunca some
+                            Math.max(windowInsets.getTappableElementInsets().bottom,
+                                    windowInsets.getStableInsetBottom()));
                     return windowInsets;
                 }
             });
