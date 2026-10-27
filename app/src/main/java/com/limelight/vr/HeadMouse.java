@@ -52,6 +52,10 @@ public class HeadMouse {
     private volatile float walkPitchBandDeg; // 0 = desligado
     private volatile WalkSource walkSource;
 
+    // Só para testes por broadcast: soma um desvio fixo e uma oscilação de pitch à leitura do sensor e pode fingir que anda
+    private volatile float testYaw, testPitch, testBobAmp, testBobHz;
+    private volatile boolean testWalking;
+
     private final Runnable tick = new Runnable() {
         @Override
         public void run() {
@@ -72,6 +76,14 @@ public class HeadMouse {
 
     public void setEdgeTurn(float edgeDeg) {
         this.edgeDeg = edgeDeg;
+    }
+
+    public void setTestOffsets(float yaw, float pitch, float bobAmp, float bobHz, boolean walking) {
+        testYaw = yaw;
+        testPitch = pitch;
+        testBobAmp = bobAmp;
+        testBobHz = bobHz;
+        testWalking = walking;
     }
 
     public void setWalkPitchBand(float bandDeg, WalkSource source) {
@@ -129,6 +141,8 @@ public class HeadMouse {
         float pitch = (float) Math.toDegrees(Math.asin(Math.max(-1f, Math.min(1f, gz))));
 
         long nowNs = System.nanoTime();
+        yaw += testYaw;
+        pitch += testPitch + testBobAmp * (float) Math.sin(2 * Math.PI * testBobHz * nowNs / 1e9);
         if (!hasPrev) {
             prevYaw = yaw;
             prevPitch = pitch;
@@ -151,7 +165,7 @@ public class HeadMouse {
 
         // Ao andar, o pitch só segue quando sai da faixa em volta da âncora
         WalkSource source = walkSource;
-        boolean walking = walkPitchBandDeg > 0 && source != null && source.isWalking();
+        boolean walking = walkPitchBandDeg > 0 && (testWalking || (source != null && source.isWalking()));
         if (walking) {
             if (!wasWalking) {
                 anchorPitch = pitch - dPitch;

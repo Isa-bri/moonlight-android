@@ -140,6 +140,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private ArPosition arPosition;
     private StereoGLView vrView;
     private BroadcastReceiver mouseTestReceiver;
+    private BroadcastReceiver headTestReceiver;
     private boolean attemptedConnection = false;
     private int suppressPipRefCount = 0;
     private String pcName;
@@ -2344,6 +2345,32 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
     }
 
+    // Teste sem mexer o celular: com o HeadMouse rodando, injeta desvio de yaw/pitch e oscilação de pitch por broadcast.
+    // adb shell am broadcast -a com.limelight.debug.DECKVR_HEAD_TEST --ef yaw 60 --ef pitch 0 --ef bob_amp 2 --ef bob_hz 2 --ez walking true
+    private void registerHeadTest() {
+        if (headMouse == null || headTestReceiver != null) {
+            return;
+        }
+        headTestReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                HeadMouse hm = headMouse;
+                if (hm != null) {
+                    hm.setTestOffsets(intent.getFloatExtra("yaw", 0), intent.getFloatExtra("pitch", 0),
+                            intent.getFloatExtra("bob_amp", 0), intent.getFloatExtra("bob_hz", 2),
+                            intent.getBooleanExtra("walking", false));
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter("com.limelight.debug.DECKVR_HEAD_TEST");
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(headTestReceiver, filter, Context.RECEIVER_EXPORTED);
+        }
+        else {
+            registerReceiver(headTestReceiver, filter);
+        }
+    }
+
     private void stopConnection() {
         if (connecting || connected) {
             connecting = connected = false;
@@ -2366,6 +2393,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             if (stepWalker != null) {
                 stepWalker.stop();
                 stepWalker = null;
+            }
+            if (headTestReceiver != null) {
+                unregisterReceiver(headTestReceiver);
+                headTestReceiver = null;
             }
             if (mouseTestReceiver != null) {
                 unregisterReceiver(mouseTestReceiver);
@@ -2575,6 +2606,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 }
 
                 registerMouseLatencyTest();
+                registerHeadTest();
 
                 if (prefConfig.vrCinema && prefConfig.vrStrafe && headStrafe == null) {
                     headStrafe = new HeadStrafe(Game.this, conn, prefConfig.vrStrafeAngle);
