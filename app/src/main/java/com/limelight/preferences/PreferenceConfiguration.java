@@ -50,6 +50,8 @@ public class PreferenceConfiguration {
     private static final String ENABLE_PIP_PREF_STRING = "checkbox_enable_pip";
     private static final String VR_CINEMA_PREF_STRING = "checkbox_vr_cinema";
     private static final String VR_HEAD_TRACKING_PREF_STRING = "checkbox_vr_head_tracking";
+    private static final String VR_SCREEN_DISTANCE_PREF_STRING = "seekbar_vr_screen_distance_cm";
+    private static final String VR_SCREEN_HEIGHT_PREF_STRING = "seekbar_vr_screen_height_cm";
     private static final String ENABLE_PERF_OVERLAY_STRING = "checkbox_enable_perf_overlay";
     private static final String BIND_ALL_USB_STRING = "checkbox_usb_bind_all";
     private static final String MOUSE_EMULATION_STRING = "checkbox_mouse_emulation";
@@ -91,6 +93,9 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_ENABLE_PIP = false;
     private static final boolean DEFAULT_VR_CINEMA = false;
     private static final boolean DEFAULT_VR_HEAD_TRACKING = true;
+    // 2,0 m de distância e 1,30 m de altura: tela de 60 graus de largura (16:9)
+    private static final int DEFAULT_VR_SCREEN_DISTANCE_CM = 200;
+    private static final int DEFAULT_VR_SCREEN_HEIGHT_CM = 130;
     private static final boolean DEFAULT_ENABLE_PERF_OVERLAY = false;
     private static final boolean DEFAULT_BIND_ALL_USB = false;
     private static final boolean DEFAULT_MOUSE_EMULATION = true;
@@ -141,6 +146,8 @@ public class PreferenceConfiguration {
     public boolean enablePip;
     public boolean vrCinema;
     public boolean vrHeadTracking;
+    public int vrScreenDistanceCm;
+    public int vrScreenHeightCm;
     public boolean enablePerfOverlay;
     public boolean enableLatencyToast;
     public boolean bindAllUsb;
@@ -591,6 +598,8 @@ public class PreferenceConfiguration {
         config.enablePip = prefs.getBoolean(ENABLE_PIP_PREF_STRING, DEFAULT_ENABLE_PIP);
         config.vrCinema = prefs.getBoolean(VR_CINEMA_PREF_STRING, DEFAULT_VR_CINEMA);
         config.vrHeadTracking = prefs.getBoolean(VR_HEAD_TRACKING_PREF_STRING, DEFAULT_VR_HEAD_TRACKING);
+        config.vrScreenDistanceCm = prefs.getInt(VR_SCREEN_DISTANCE_PREF_STRING, DEFAULT_VR_SCREEN_DISTANCE_CM);
+        config.vrScreenHeightCm = prefs.getInt(VR_SCREEN_HEIGHT_PREF_STRING, DEFAULT_VR_SCREEN_HEIGHT_CM);
         config.enablePerfOverlay = prefs.getBoolean(ENABLE_PERF_OVERLAY_STRING, DEFAULT_ENABLE_PERF_OVERLAY);
         config.bindAllUsb = prefs.getBoolean(BIND_ALL_USB_STRING, DEFAULT_BIND_ALL_USB);
         config.mouseEmulation = prefs.getBoolean(MOUSE_EMULATION_STRING, DEFAULT_MOUSE_EMULATION);

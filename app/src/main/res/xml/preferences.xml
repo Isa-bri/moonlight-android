@@ -269,6 +269,30 @@
             android:title="@string/title_vr_head_tracking"
             android:summary="@string/summary_vr_head_tracking"
             android:defaultValue="true"/>
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_screen_distance_cm"
+            android:dependency="checkbox_vr_head_tracking"
+            android:defaultValue="200"
+            seekbar:min="100"
+            android:max="500"
+            seekbar:step="10"
+            seekbar:divisor="100"
+            android:dialogMessage="@string/summary_vr_screen_distance"
+            android:summary="@string/summary_vr_screen_distance"
+            android:text="@string/suffix_vr_screen_meters"
+            android:title="@string/title_vr_screen_distance" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_screen_height_cm"
+            android:dependency="checkbox_vr_head_tracking"
+            android:defaultValue="130"
+            seekbar:min="50"
+            android:max="300"
+            seekbar:step="5"
+            seekbar:divisor="100"
+            android:dialogMessage="@string/summary_vr_screen_height"
+            android:summary="@string/summary_vr_screen_height"
+            android:text="@string/suffix_vr_screen_meters"
+            android:title="@string/title_vr_screen_height" />
         <CheckBoxPreference
             android:key="checkbox_enable_perf_overlay"
             android:title="@string/title_enable_perf_overlay"

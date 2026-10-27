@@ -2,11 +2,16 @@ package com.limelight.vr;
 
 import android.content.Context;
 import android.graphics.SurfaceTexture;
+import android.opengl.EGL14;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.Matrix;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Process;
 import android.util.Log;
+import android.view.Choreographer;
 import android.view.Surface;
 
 import java.nio.ByteBuffer;
@@ -51,11 +56,10 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
     private static final float[] QUAD = {-1, -1, 1, -1, -1, 1, 1, 1};
 
-    // Tela virtual do modo cinema (metros): altura fixa, largura pela proporção do vídeo
-    private static final float SCREEN_DISTANCE = 2.0f;
-    private static final float SCREEN_HEIGHT = 1.2f;
-    // Campo de visão vertical por olho e distância entre os olhos (valores provisórios até a etapa 4)
-    private static final float FOV_Y_DEGREES = 90.0f;
+    // Campo de visão vertical por olho e distância entre os olhos (valores provisórios até a etapa 4).
+    // 80 graus: com lentes de 40 mm e ~45 mm de distância focal (suposição para o Shinecon G13), a
+    // metade da tela do S23 Ultra (~78 x 73 mm) cobre cerca de 80 x 79 graus
+    private static final float FOV_Y_DEGREES = 80.0f;
     private static final float IPD = 0.063f;
 
     private final int videoWidth;
@@ -93,8 +97,9 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
     private long statsSumNs;
     private long statsMaxNs;
 
+    // screenDistance e screenHeight (metros) definem a tela virtual do modo cinema; a largura vem da proporção do vídeo
     public StereoGLView(Context context, int videoWidth, int videoHeight, boolean measureLatency,
-                        boolean headTracking, SurfaceListener listener) {
+                        boolean headTracking, float screenDistance, float screenHeight, SurfaceListener listener) {
         super(context);
         this.videoWidth = videoWidth;
         this.videoHeight = videoHeight;
@@ -103,14 +108,14 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
         Matrix.setIdentityM(identity, 0);
 
-        // Quad (x, y) em [-1, 1] -> plano vertical a SCREEN_DISTANCE à frente (+Y), centrado na altura dos olhos
-        float halfWidth = SCREEN_HEIGHT * videoWidth / videoHeight / 2;
-        float halfHeight = SCREEN_HEIGHT / 2;
+        // Quad (x, y) em [-1, 1] -> plano vertical a screenDistance à frente (+Y), centrado na altura dos olhos
+        float halfWidth = screenHeight * videoWidth / videoHeight / 2;
+        float halfHeight = screenHeight / 2;
         System.arraycopy(new float[] {
                 halfWidth, 0, 0, 0,
                 0, 0, halfHeight, 0,
                 0, 1, 0, 0,
-                0, SCREEN_DISTANCE, 0, 1
+                0, screenDistance, 0, 1
         }, 0, screenModel, 0, 16);
 
         this.headTracker = new HeadTracker(context);
@@ -125,23 +130,59 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
         setEGLContextClientVersion(2);
         setRenderer(this);
-        // Com head tracking desenha a cada vsync usando a leitura mais recente do sensor (200 Hz
-        // de redesenhos disputariam a thread GL com os quadros de vídeo); sem ele, só quando chega quadro
-        setRenderMode(headTracking ? RENDERMODE_CONTINUOUSLY : RENDERMODE_WHEN_DIRTY);
+        // Desenha quando chega um quadro de vídeo e, com head tracking, também a cada vsync (ver startVsync)
+        setRenderMode(RENDERMODE_WHEN_DIRTY);
     }
 
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        if (headTracking && !headTracker.start()) {
-            Log.w("DeckVR", "Sem TYPE_GAME_ROTATION_VECTOR neste aparelho; usando a tela fixa");
+        if (headTracking) {
+            if (headTracker.start()) {
+                startVsync();
+            }
+            else {
+                Log.w("DeckVR", "Sem TYPE_GAME_ROTATION_VECTOR neste aparelho; usando a tela fixa");
+            }
         }
     }
 
     @Override
     protected void onDetachedFromWindow() {
+        stopVsync();
         headTracker.stop();
         super.onDetachedFromWindow();
+    }
+
+    // Um pedido de desenho por vsync, para a cabeça se mover mesmo entre quadros de vídeo. Roda numa
+    // thread própria (cada Looper tem o seu Choreographer) para não depender da thread principal.
+    private HandlerThread vsyncThread;
+    private volatile boolean vsyncRunning;
+
+    private void startVsync() {
+        vsyncThread = new HandlerThread("DeckVR-Vsync", Process.THREAD_PRIORITY_URGENT_DISPLAY);
+        vsyncThread.start();
+        vsyncRunning = true;
+        new Handler(vsyncThread.getLooper()).post(() -> {
+            Choreographer choreographer = Choreographer.getInstance();
+            choreographer.postFrameCallback(new Choreographer.FrameCallback() {
+                @Override
+                public void doFrame(long frameTimeNanos) {
+                    if (vsyncRunning) {
+                        requestRender();
+                        choreographer.postFrameCallback(this);
+                    }
+                }
+            });
+        });
+    }
+
+    private void stopVsync() {
+        vsyncRunning = false;
+        if (vsyncThread != null) {
+            vsyncThread.quitSafely();
+            vsyncThread = null;
+        }
     }
 
     // Recentra a tela virtual na direção atual do olhar
@@ -151,6 +192,12 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
     @Override
     public void onSurfaceCreated(GL10 unused, EGLConfig config) {
+        // Troca assíncrona: o quadro novo substitui o que ainda não foi exibido, então não se forma
+        // fila de buffers à frente do vsync (cada desenho entra na tela no vsync seguinte) e o
+        // eglSwapBuffers não bloqueia a thread GL
+        EGL14.eglSwapInterval(EGL14.eglGetCurrentDisplay(), 0);
+        Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
+
         program = buildProgram();
         posLoc = GLES20.glGetAttribLocation(program, "aPos");
         texMatrixLoc = GLES20.glGetUniformLocation(program, "uTexMatrix");
