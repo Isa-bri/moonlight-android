@@ -26,7 +26,7 @@ import java.util.EnumSet;
 import java.util.List;
 
 // Posição da cabeça pelo ARCore (câmera traseira + sensores) como joystick: o deslocamento do ponto de origem,
-// medido nos eixos do olhar, segura W/S (frente/trás) e A/D (direita/esquerda). Dar um passo para trás segura S.
+// medido nos eixos do corpo (a direção do olhar quando a origem foi definida), segura W/S (frente/trás) e A/D (direita/esquerda). Dar um passo para trás segura S.
 // Voltar ao ponto de origem solta as teclas. recenter() move a origem para onde a cabeça está agora.
 //
 // O ARCore precisa de uma textura OES para a imagem da câmera, então esta classe tem o próprio contexto EGL
@@ -39,10 +39,14 @@ public class ArPosition {
     private static final short KEY_S = (short) 0x8053;
     private static final short KEY_D = (short) 0x8044;
 
+    private static final float SIDE_FACTOR = 2f;
+
     private final Context context;
     private final NvConnection conn;
     private final float thresholdM;
     private final float releaseM;
+    private final float sideThresholdM;
+    private final float sideReleaseM;
 
     private Thread thread;
     private volatile boolean running;
@@ -57,6 +61,9 @@ public class ArPosition {
         this.conn = conn;
         this.thresholdM = thresholdM;
         this.releaseM = thresholdM * 0.6f; // histerese
+        // Os lados pedem mais deslocamento: a cabeça balança para os lados sem querer
+        this.sideThresholdM = thresholdM * SIDE_FACTOR;
+        this.sideReleaseM = sideThresholdM * 0.6f;
     }
 
     public boolean start() {
@@ -140,7 +147,8 @@ public class ArPosition {
             Log.i(TAG, "ARCore iniciado");
 
             float originX = 0, originZ = 0;
-            float fwdX = 0, fwdZ = -1;
+            float fwdX = 0, fwdZ = -1;       // olhar atual
+            float bodyX = 0, bodyZ = -1;     // frente do corpo, fixada na origem
             TrackingState last = null;
             while (running) {
                 Frame frame = session.update();
@@ -170,18 +178,20 @@ public class ArPosition {
                     recenterRequested = false;
                     originX = x;
                     originZ = z;
+                    bodyX = fwdX;
+                    bodyZ = fwdZ;
                     releaseAll();
                 }
 
                 float dx = x - originX, dz = z - originZ;
-                // direita = (-fwdZ, fwdX) no sistema do ARCore (Y para cima, olhando para -Z)
-                float forward = dx * fwdX + dz * fwdZ;
-                float side = dx * -fwdZ + dz * fwdX;
+                // direita = (-bodyZ, bodyX) no sistema do ARCore (Y para cima, olhando para -Z)
+                float forward = dx * bodyX + dz * bodyZ;
+                float side = dx * -bodyZ + dz * bodyX;
 
                 boolean wantFwd = hold(fwdHeld, forward);
                 boolean wantBack = hold(backHeld, -forward);
-                boolean wantRight = hold(rightHeld, side);
-                boolean wantLeft = hold(leftHeld, -side);
+                boolean wantRight = holdSide(rightHeld, side);
+                boolean wantLeft = holdSide(leftHeld, -side);
                 fwdHeld = key(KEY_W, fwdHeld, wantFwd);
                 backHeld = key(KEY_S, backHeld, wantBack);
                 rightHeld = key(KEY_D, rightHeld, wantRight);
@@ -219,6 +229,10 @@ public class ArPosition {
     // Liga acima do limiar; desliga só abaixo do limiar de soltura
     private boolean hold(boolean held, float offset) {
         return held ? offset > releaseM : offset > thresholdM;
+    }
+
+    private boolean holdSide(boolean held, float offset) {
+        return held ? offset > sideReleaseM : offset > sideThresholdM;
     }
 
     private boolean key(short code, boolean was, boolean want) {
