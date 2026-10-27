@@ -19,8 +19,9 @@ import com.limelight.nvstream.input.KeyboardPacket;
 // W descendo/subindo com a duração e a cadência. Um resumo por segundo só aparece se houve pico no período.
 public class StepWalker implements SensorEventListener {
     private static final short KEY_W = (short) 0x8057;
-    private static final long MIN_STEP_INTERVAL_NS = 280_000_000L;
-    private static final long RELEASE_AFTER_MS = 650;
+    private static final long MIN_STEP_INTERVAL_NS = 380_000_000L;
+    private static final long ARM_WINDOW_NS = 1_200_000_000L;
+    private static final long RELEASE_AFTER_MS = 900;
     private static final long LOG_WINDOW_NS = 1_000_000_000L;
 
     private final SensorManager sensorManager;
@@ -47,7 +48,7 @@ public class StepWalker implements SensorEventListener {
         this.sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         this.conn = conn;
         this.thresholdMs2 = thresholdMs2;
-        this.detector = new StepDetector(thresholdMs2, MIN_STEP_INTERVAL_NS);
+        this.detector = new StepDetector(thresholdMs2, MIN_STEP_INTERVAL_NS, ARM_WINDOW_NS);
     }
 
     public boolean start() {
@@ -59,8 +60,9 @@ public class StepWalker implements SensorEventListener {
         thread.start();
         handler = new Handler(thread.getLooper());
         boolean ok = sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME, handler);
-        VrLog.i("PASSO", "iniciado ok=%b limiar=%.1fm/s2 intervalo_min=%dms solta_apos=%dms atraso_min=%dus",
-                ok, thresholdMs2, MIN_STEP_INTERVAL_NS / 1_000_000, RELEASE_AFTER_MS, sensor.getMinDelay());
+        VrLog.i("PASSO", "iniciado ok=%b limiar=%.1fm/s2 intervalo_min=%dms solta_apos=%dms janela_confirma=%dms atraso_min=%dus",
+                ok, thresholdMs2, MIN_STEP_INTERVAL_NS / 1_000_000, RELEASE_AFTER_MS, ARM_WINDOW_NS / 1_000_000,
+                sensor.getMinDelay());
         return ok;
     }
 
@@ -95,19 +97,21 @@ public class StepWalker implements SensorEventListener {
         boolean step = detector.onSample(event.values[0], event.values[1], event.values[2], event.timestamp);
         if (step) {
             lastStepNsWall = System.nanoTime();
-            if (!down) {
-                down = true;
-                walkSteps = 0;
-                walkStartNs = lastStepNsWall;
-                conn.sendKeyboardInput(KEY_W, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
-                VrLog.i("PASSO", "W desceu");
-            }
-            walkSteps++;
             winSteps++;
-            handler.removeCallbacks(release);
-            handler.postDelayed(release, RELEASE_AFTER_MS);
-            VrLog.i("PASSO", "passo pico=%.2fm/s2 limiar=%.1f intervalo=%dms", detector.excess, thresholdMs2,
-                    detector.sinceLastStepMs);
+            if (detector.walking) {
+                if (!down) {
+                    down = true;
+                    walkSteps = 0;
+                    walkStartNs = lastStepNsWall;
+                    conn.sendKeyboardInput(KEY_W, KeyboardPacket.KEY_DOWN, (byte) 0, (byte) 0);
+                    VrLog.i("PASSO", "W desceu (segundo passo seguido)");
+                }
+                walkSteps++;
+                handler.removeCallbacks(release);
+                handler.postDelayed(release, RELEASE_AFTER_MS);
+            }
+            VrLog.i("PASSO", "passo pico=%.2fm/s2 limiar=%.1f intervalo=%dms%s", detector.excess, thresholdMs2,
+                    detector.sinceLastStepMs, detector.walking ? "" : " (isolado, espera o segundo)");
         }
         if (detector.bumpWasMiss) {
             winNearMiss++;

@@ -16,7 +16,7 @@ public class StepDetectorTest {
 
     @Before
     public void setUp() {
-        detector = new StepDetector(2.0f, 280 * MS);
+        detector = new StepDetector(2.0f, 280 * MS, 1200 * MS);
         t = 10_000 * MS;
         for (int i = 0; i < 200; i++) sample(G); // a gravidade assenta
     }
@@ -77,5 +77,39 @@ public class StepDetectorTest {
             for (int j = 0; j < 40; j++) sample(G); // 400 ms entre passos
         }
         assertEquals(5, steps);
+    }
+
+    @Test
+    public void passoIsoladoNaoConfirmaACaminhada() {
+        assertTrue(sample(G + 3f));
+        assertFalse(detector.walking);
+        for (int i = 0; i < 150; i++) { // 1,5 s sem outro passo
+            sample(G);
+            assertFalse(detector.walking);
+        }
+    }
+
+    @Test
+    public void segundoPassoSeguidoConfirmaEOsSeguintesMantem() {
+        assertTrue(sample(G + 3f));
+        assertFalse(detector.walking);
+        for (int j = 0; j < 40; j++) sample(G);
+        assertTrue(sample(G + 3f)); // 400 ms depois
+        assertTrue(detector.walking);
+        for (int j = 0; j < 40; j++) sample(G);
+        assertTrue(sample(G + 3f));
+        assertTrue(detector.walking);
+    }
+
+    @Test
+    public void pausaLongaDesfazAConfirmacao() {
+        sample(G + 3f);
+        for (int j = 0; j < 40; j++) sample(G);
+        sample(G + 3f);
+        assertTrue(detector.walking);
+        for (int j = 0; j < 130; j++) sample(G); // 1,3 s parado
+        assertFalse(detector.walking);
+        assertTrue(sample(G + 3f)); // um passo depois da pausa recomeça: isolado de novo
+        assertFalse(detector.walking);
     }
 }
