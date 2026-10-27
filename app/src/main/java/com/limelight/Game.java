@@ -36,6 +36,7 @@ import com.limelight.vr.HeadStrafe;
 import com.limelight.vr.ArPosition;
 import com.limelight.vr.StepWalker;
 import com.limelight.vr.StereoGLView;
+import com.limelight.vr.VrLog;
 import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
 import com.limelight.utils.ShortcutHelper;
@@ -141,6 +142,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private StereoGLView vrView;
     private BroadcastReceiver mouseTestReceiver;
     private BroadcastReceiver headTestReceiver;
+    private BroadcastReceiver logReceiver;
     private boolean attemptedConnection = false;
     private int suppressPipRefCount = 0;
     private String pcName;
@@ -1477,6 +1479,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 if (arPosition != null) {
                     arPosition.recenter();
                 }
+                VrLog.i("VOL", "volume baixo solto: centro redefinido (giro na borda%s)",
+                        arPosition != null ? " e origem do ARCore" : "");
                 vibrateShort();
                 return true;
             }
@@ -2306,6 +2310,51 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     public void stageComplete(String stage) {
     }
 
+    // Uma linha com todas as opções VR em vigor: cada captura de log fica auto-explicativa
+    private void logVrConfig() {
+        if (!prefConfig.vrCinema) {
+            return;
+        }
+        VrLog.i("CONFIG", "mouse=%b sens=%d vert=%d%% borda=%b borda_graus=%d banda=%.1f passos=%b passos_limiar=%.1f lado=%b lado_graus=%d "
+                        + "ar=%b ar_cm=%d ipd=%dmm k1=%.2f ca=%.2f tela=%dcm/%dcm cabeca_visual=%b res=%dx%d fps=%d",
+                prefConfig.vrHeadMouse, prefConfig.vrHeadMouseSensitivity, prefConfig.vrHeadMousePitchPercent,
+                prefConfig.vrEdgeTurn, prefConfig.vrEdgeTurnAngle, prefConfig.vrWalkPitchBand / 10f,
+                prefConfig.vrWalk, prefConfig.vrWalkThreshold / 10f, prefConfig.vrStrafe, prefConfig.vrStrafeAngle,
+                prefConfig.vrPosition, prefConfig.vrPositionDistance, prefConfig.vrIpdMm,
+                prefConfig.vrLensDistortion / 100f, prefConfig.vrChromatic / 100f,
+                prefConfig.vrScreenDistanceCm, prefConfig.vrScreenHeightCm, prefConfig.vrHeadTracking,
+                prefConfig.width, prefConfig.height, prefConfig.fps);
+    }
+
+    // Nível do log de diagnóstico dos controles, com o celular no óculos:
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_LOG --es mode off|on|verbose
+    private void registerLogControl() {
+        if (logReceiver != null) {
+            return;
+        }
+        logReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                int level = VrLog.parse(intent.getStringExtra("mode"));
+                if (level < 0) {
+                    Log.w(VrLog.TAG, "LOG mode invalido; use off, on ou verbose");
+                    return;
+                }
+                VrLog.setLevel(level);
+                if (level != VrLog.OFF) {
+                    logVrConfig();
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter(VrLog.ACTION);
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(logReceiver, filter, Context.RECEIVER_EXPORTED);
+        }
+        else {
+            registerReceiver(logReceiver, filter);
+        }
+    }
+
     // Teste de latência do caminho do mouse (debug):
     //   adb shell am broadcast -a com.limelight.debug.DECKVR_MOUSE_TEST --ei n 20
     // manda n movimentos alternados (+40/-40) e registra "MOUSE enviado ... t=" no log; a StereoGLView
@@ -2397,6 +2446,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             if (headTestReceiver != null) {
                 unregisterReceiver(headTestReceiver);
                 headTestReceiver = null;
+            }
+            if (logReceiver != null) {
+                unregisterReceiver(logReceiver);
+                logReceiver = null;
             }
             if (mouseTestReceiver != null) {
                 unregisterReceiver(mouseTestReceiver);
@@ -2605,6 +2658,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     }
                 }
 
+                logVrConfig();
+                registerLogControl();
                 registerMouseLatencyTest();
                 registerHeadTest();
 

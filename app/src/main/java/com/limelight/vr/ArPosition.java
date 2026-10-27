@@ -29,10 +29,16 @@ import java.util.List;
 // medido nos eixos do corpo (a direção do olhar quando a origem foi definida), segura W/S (frente/trás) e A/D (direita/esquerda). Dar um passo para trás segura S.
 // Voltar ao ponto de origem solta as teclas. recenter() move a origem para onde a cabeça está agora.
 //
+// Diagnóstico (VrLog, linhas AR): quadros/s e maior intervalo entre quadros (o ARCore a 30 fps; atraso aqui é atraso do
+// andar), deslocamento frente/lado mínimo e máximo por segundo, cada tecla que desce/sobe com o deslocamento do momento
+// e quanto tempo ficou segurada, perdas de rastreamento com a duração, saltos de pose entre quadros seguidos (reposição
+// do ARCore, que dispara tecla falsa) e a deriva da origem a cada recentrada.
+//
 // O ARCore precisa de uma textura OES para a imagem da câmera, então esta classe tem o próprio contexto EGL
 // (superfície 1x1) numa thread dedicada, sem relação com o StereoGLView.
 public class ArPosition {
-    private static final String TAG = "DeckVR-ArPosition";
+    private static final float JUMP_M = 0.25f;     // salto de pose entre dois quadros que não é movimento de gente
+    private static final long LOG_WINDOW_MS = 1000;
 
     private static final short KEY_W = (short) 0x8057;
     private static final short KEY_A = (short) 0x8041;
@@ -55,6 +61,18 @@ public class ArPosition {
     // Só usados pela thread do ARCore
     private volatile boolean fwdHeld, backHeld, leftHeld, rightHeld;
     private long lastLog;
+
+    // Diagnóstico, só na thread do ARCore
+    private float curForward, curSide;
+    private long heldFwdNs, heldBackNs, heldLeftNs, heldRightNs;
+    private long lostSinceNs;
+    private long lastFrameNs, winMaxGapNs;
+    private int winFrames, winLost, winJumps;
+    private float winMinFwd = Float.MAX_VALUE, winMaxFwd = -Float.MAX_VALUE;
+    private float winMinSide = Float.MAX_VALUE, winMaxSide = -Float.MAX_VALUE;
+    private float prevX, prevZ;
+    private boolean hasPrevPose;
+    private long lastPoseNs;
 
     public ArPosition(Context context, NvConnection conn, float thresholdM) {
         this.context = context;
@@ -148,7 +166,9 @@ public class ArPosition {
             session.setCameraTextureName(tex[0]);
             session.setDisplayGeometry(Surface.ROTATION_90, 1, 1);
             session.resume();
-            Log.i(TAG, "ARCore iniciado");
+            VrLog.i("AR", "iniciado limiar=%.0fcm lado=%.0fcm soltura=%.0f%% resolucao=%s",
+                    thresholdM * 100, sideThresholdM * 100, releaseM / thresholdM * 100,
+                    smallest != null ? smallest.getImageSize().getWidth() + "x" + smallest.getImageSize().getHeight() : "?");
 
             float originX = 0, originZ = 0;
             float fwdX = 0, fwdZ = -1;       // olhar atual
@@ -156,20 +176,47 @@ public class ArPosition {
             TrackingState last = null;
             while (running) {
                 Frame frame = session.update();
+                long frameNs = System.nanoTime();
+                if (lastFrameNs != 0) {
+                    winMaxGapNs = Math.max(winMaxGapNs, frameNs - lastFrameNs);
+                }
+                lastFrameNs = frameNs;
+                winFrames++;
                 com.google.ar.core.Camera camera = frame.getCamera();
                 TrackingState state = camera.getTrackingState();
                 if (state != last) {
-                    Log.i(TAG, "rastreamento: " + state + " " + camera.getTrackingFailureReason());
+                    VrLog.w("AR", "rastreamento %s motivo=%s", state, camera.getTrackingFailureReason());
+                    if (state == TrackingState.TRACKING) {
+                        if (lostSinceNs != 0) {
+                            VrLog.i("AR", "rastreamento voltou apos %.1fs", (frameNs - lostSinceNs) / 1e9);
+                        }
+                        lostSinceNs = 0;
+                    }
+                    else if (lostSinceNs == 0) {
+                        lostSinceNs = frameNs;
+                        winLost++;
+                    }
                     last = state;
                 }
                 if (state != TrackingState.TRACKING) {
-                    releaseAll();
+                    hasPrevPose = false;
+                    releaseAll("rastreamento perdido");
+                    logWindow();
                     continue;
                 }
 
                 Pose pose = camera.getPose();
                 float x = pose.tx();
                 float z = pose.tz();
+                if (hasPrevPose && Math.hypot(x - prevX, z - prevZ) > JUMP_M) {
+                    winJumps++;
+                    VrLog.w("AR", "salto de pose %.2fm entre quadros (%.0fms)", Math.hypot(x - prevX, z - prevZ),
+                            (frameNs - lastPoseNs) / 1e6);
+                }
+                prevX = x;
+                prevZ = z;
+                lastPoseNs = frameNs;
+                hasPrevPose = true;
                 float[] zAxis = pose.getZAxis(); // sai da tela; o olhar é -Z
                 float hx = -zAxis[0], hz = -zAxis[2];
                 float hLen = (float) Math.hypot(hx, hz);
@@ -180,17 +227,27 @@ public class ArPosition {
 
                 if (recenterRequested) {
                     recenterRequested = false;
+                    // Quanto a origem antiga estava longe de onde a cabeça foi parar: é a deriva (ou o deslocamento real)
+                    // que a recentrada corrige; um S ou A preso costuma vir daqui
+                    VrLog.i("AR", "recentrou deslocamento_antes frente=%+.2fm lado=%+.2fm", curForward, curSide);
                     originX = x;
                     originZ = z;
                     bodyX = fwdX;
                     bodyZ = fwdZ;
-                    releaseAll();
+                    releaseAll("recentrou");
                 }
 
                 float dx = x - originX, dz = z - originZ;
                 // direita = (-bodyZ, bodyX) no sistema do ARCore (Y para cima, olhando para -Z)
                 float forward = dx * bodyX + dz * bodyZ;
                 float side = dx * -bodyZ + dz * bodyX;
+
+                curForward = forward;
+                curSide = side;
+                winMinFwd = Math.min(winMinFwd, forward);
+                winMaxFwd = Math.max(winMaxFwd, forward);
+                winMinSide = Math.min(winMinSide, side);
+                winMaxSide = Math.max(winMaxSide, side);
 
                 boolean wantFwd = hold(fwdHeld, forward);
                 boolean wantBack = hold(backHeld, -forward);
@@ -201,18 +258,14 @@ public class ArPosition {
                 rightHeld = key(KEY_D, rightHeld, wantRight);
                 leftHeld = key(KEY_A, leftHeld, wantLeft);
 
-                long now = System.currentTimeMillis();
-                if (now - lastLog > 1000) {
-                    lastLog = now;
-                    Log.i(TAG, String.format("frente %.2f m, lado %.2f m", forward, side));
-                }
+                logWindow();
             }
         } catch (Throwable t) {
             if (running) {
-                Log.e(TAG, "ARCore falhou", t);
+                Log.e(VrLog.TAG, "AR ARCore falhou", t);
             }
         } finally {
-            releaseAll();
+            releaseAll("encerrando");
             if (session != null) {
                 try {
                     session.close();
@@ -242,14 +295,63 @@ public class ArPosition {
     private boolean key(short code, boolean was, boolean want) {
         if (want != was) {
             conn.sendKeyboardInput(code, want ? KeyboardPacket.KEY_DOWN : KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+            long now = System.nanoTime();
+            if (want) {
+                setHeldSince(code, now);
+                VrLog.i("AR", "%s desceu frente=%+.2fm lado=%+.2fm", keyName(code), curForward, curSide);
+            }
+            else {
+                VrLog.i("AR", "%s subiu frente=%+.2fm lado=%+.2fm segurou=%.1fs", keyName(code), curForward, curSide,
+                        (now - heldSince(code)) / 1e9);
+            }
         }
         return want;
     }
 
-    private void releaseAll() {
+    private void releaseAll(String why) {
+        if (isWalking()) {
+            VrLog.i("AR", "soltando tudo: %s", why);
+        }
         fwdHeld = key(KEY_W, fwdHeld, false);
         backHeld = key(KEY_S, backHeld, false);
         rightHeld = key(KEY_D, rightHeld, false);
         leftHeld = key(KEY_A, leftHeld, false);
+    }
+
+    private static String keyName(short code) {
+        return code == KEY_W ? "W" : code == KEY_S ? "S" : code == KEY_A ? "A" : "D";
+    }
+
+    private long heldSince(short code) {
+        return code == KEY_W ? heldFwdNs : code == KEY_S ? heldBackNs : code == KEY_A ? heldLeftNs : heldRightNs;
+    }
+
+    private void setHeldSince(short code, long ns) {
+        if (code == KEY_W) heldFwdNs = ns;
+        else if (code == KEY_S) heldBackNs = ns;
+        else if (code == KEY_A) heldLeftNs = ns;
+        else heldRightNs = ns;
+    }
+
+    private void logWindow() {
+        long now = System.currentTimeMillis();
+        if (lastLog == 0) {
+            lastLog = now;
+            return;
+        }
+        if (now - lastLog < LOG_WINDOW_MS) {
+            return;
+        }
+        VrLog.i("AR", "quadros=%.0f/s gap_max=%.0fms frente=%+.2f..%+.2fm lado=%+.2f..%+.2fm teclas=%s%s%s%s perdas=%d saltos=%d",
+                winFrames * 1000.0 / (now - lastLog), winMaxGapNs / 1e6,
+                winMinFwd == Float.MAX_VALUE ? 0f : winMinFwd, winMaxFwd == -Float.MAX_VALUE ? 0f : winMaxFwd,
+                winMinSide == Float.MAX_VALUE ? 0f : winMinSide, winMaxSide == -Float.MAX_VALUE ? 0f : winMaxSide,
+                fwdHeld ? "W" : "", backHeld ? "S" : "", leftHeld ? "A" : "", rightHeld ? "D" : "",
+                winLost, winJumps);
+        lastLog = now;
+        winFrames = winLost = winJumps = 0;
+        winMaxGapNs = 0;
+        winMinFwd = winMinSide = Float.MAX_VALUE;
+        winMaxFwd = winMaxSide = -Float.MAX_VALUE;
     }
 }

@@ -138,6 +138,9 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
     private int statsFrames;
     private long statsSumNs;
     private long statsMaxNs;
+    private long statsLastFrameNs;
+    private long statsMaxGapNs;
+    private int statsSlowGaps;
 
     // Teste de latência do mouse (debug): lê 1 pixel do centro do olho esquerdo a cada quadro novo e
     // registra o instante em que a luminância muda (o host pisca a tela quando o mouse mexe)
@@ -194,7 +197,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
                 startVsync();
             }
             else {
-                Log.w("DeckVR", "Sem TYPE_GAME_ROTATION_VECTOR neste aparelho; usando a tela fixa");
+                VrLog.w("GL:", "Sem TYPE_GAME_ROTATION_VECTOR neste aparelho; usando a tela fixa");
             }
         }
     }
@@ -437,7 +440,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         boolean ok = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE;
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
         if (!ok) {
-            Log.w("DeckVR", "Framebuffer incompleto; sem correção de distorção");
+            VrLog.w("GL:", "Framebuffer incompleto; sem correção de distorção");
             return false;
         }
         fboWidth = width;
@@ -458,13 +461,23 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         statsFrames++;
         statsSumNs += ns;
         statsMaxNs = Math.max(statsMaxNs, ns);
+        // Intervalo entre quadros de vídeo desenhados: a imagem "trava" quando ele passa de ~2 quadros (33 ms a 60 fps)
+        if (statsLastFrameNs != 0) {
+            long gap = now - statsLastFrameNs;
+            statsMaxGapNs = Math.max(statsMaxGapNs, gap);
+            if (gap > 33_000_000L) statsSlowGaps++;
+        }
+        statsLastFrameNs = now;
 
         if (now - statsStartNs >= 2_000_000_000L) {
-            Log.i("DeckVR", String.format("GL: %d quadros em %.1f s, atraso quadro->desenho medio %.2f ms, max %.2f ms",
-                    statsFrames, (now - statsStartNs) / 1e9, statsSumNs / 1e6 / statsFrames, statsMaxNs / 1e6));
+            VrLog.i("GL:", "%d quadros em %.1f s, atraso quadro->desenho medio %.2f ms, max %.2f ms, intervalo max %.1f ms, travadas(>33ms) %d",
+                    statsFrames, (now - statsStartNs) / 1e9, statsSumNs / 1e6 / statsFrames, statsMaxNs / 1e6,
+                    statsMaxGapNs / 1e6, statsSlowGaps);
             statsFrames = 0;
             statsSumNs = 0;
             statsMaxNs = 0;
+            statsMaxGapNs = 0;
+            statsSlowGaps = 0;
         }
     }
 

@@ -16,6 +16,7 @@ import org.jcodec.codecs.h264.io.model.VUIParameters;
 import com.limelight.BuildConfig;
 import com.limelight.LimeLog;
 import com.limelight.R;
+import com.limelight.vr.VrLog;
 import com.limelight.nvstream.av.video.VideoDecoderRenderer;
 import com.limelight.nvstream.jni.MoonBridge;
 import com.limelight.preferences.PreferenceConfiguration;
@@ -1415,6 +1416,16 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
                 }
                 sb.append(context.getString(R.string.perf_overlay_dectime, decodeTimeMs));
                 perfListener.onPerfUpdate(sb.toString());
+
+                // Mesmos números do overlay, em linha única para o log de diagnóstico dos controles VR
+                VrLog.i("REDE", "fps=%.1f recebidos=%.1f renderizados=%.1f perda=%.2f%% rtt=%dms var=%dms host_ms=%.1f/%.1f/%.1f decodificacao=%.1fms",
+                        fps.totalFps, fps.receivedFps, fps.renderedFps,
+                        lastTwo.totalFrames > 0 ? (float)lastTwo.framesLost / lastTwo.totalFrames * 100 : 0f,
+                        (int)(rttInfo >> 32), (int)rttInfo,
+                        lastTwo.framesWithHostProcessingLatency > 0 ? (float)lastTwo.minHostProcessingLatency / 10 : 0f,
+                        lastTwo.framesWithHostProcessingLatency > 0 ? (float)lastTwo.maxHostProcessingLatency / 10 : 0f,
+                        lastTwo.framesWithHostProcessingLatency > 0 ? (float)lastTwo.totalHostProcessingLatency / 10 / lastTwo.framesWithHostProcessingLatency : 0f,
+                        decodeTimeMs);
             }
 
             globalVideoStats.add(activeWindowVideoStats);
