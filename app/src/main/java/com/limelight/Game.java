@@ -2315,11 +2315,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         if (!prefConfig.vrCinema) {
             return;
         }
-        VrLog.i("CONFIG", "mouse=%b sens=%d vert=%d%% borda=%b borda_graus=%d banda=%.1f passos=%b passos_limiar=%.1f lado=%b lado_graus=%d "
+        VrLog.i("CONFIG", "mouse=%b sens=%d vert=%d%% borda=%b borda_graus=%d passos_borda=%b mouse_sync=%b banda=%.1f passos=%b passos_limiar=%.1f lado=%b lado_graus=%d "
                         + "ar=%b ar_cm=%d ipd=%dmm k1=%.2f ca=%.2f tela=%dcm/%dcm cabeca_visual=%b res=%dx%d fps=%d",
                 prefConfig.vrHeadMouse, prefConfig.vrHeadMouseSensitivity, prefConfig.vrHeadMousePitchPercent,
-                prefConfig.vrEdgeTurn, prefConfig.vrEdgeTurnAngle, prefConfig.vrWalkPitchBand / 10f,
-                prefConfig.vrWalk, prefConfig.vrWalkThreshold / 10f, prefConfig.vrStrafe, prefConfig.vrStrafeAngle,
+                prefConfig.vrEdgeTurn, prefConfig.vrEdgeTurnAngle, prefConfig.vrSnapTurn, prefConfig.vrMouseSync,
+                prefConfig.vrWalkPitchBand / 10f, prefConfig.vrWalk, prefConfig.vrWalkThreshold / 10f, prefConfig.vrStrafe, prefConfig.vrStrafeAngle,
                 prefConfig.vrPosition, prefConfig.vrPositionDistance, prefConfig.vrIpdMm,
                 prefConfig.vrLensDistortion / 100f, prefConfig.vrChromatic / 100f,
                 prefConfig.vrScreenDistanceCm, prefConfig.vrScreenHeightCm, prefConfig.vrHeadTracking,
@@ -2643,7 +2643,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     headMouse = new HeadMouse(Game.this, conn, prefConfig.vrHeadMouseSensitivity, prefConfig.vrHeadMousePitchPercent / 100f);
                     if (prefConfig.vrEdgeTurn) {
                         headMouse.setEdgeTurn(prefConfig.vrEdgeTurnAngle);
+                        headMouse.setSnapTurn(prefConfig.vrSnapTurn);
                     }
+                    headMouse.setSyncToSensor(prefConfig.vrMouseSync);
                     headMouse.setWalkPitchBand(prefConfig.vrWalkPitchBand / 10f, new HeadMouse.WalkSource() {
                         @Override
                         public boolean isWalking() {

@@ -414,6 +414,18 @@
             android:summary="@string/summary_vr_edge_turn_angle"
             android:text="@string/suffix_degrees"
             android:title="@string/title_vr_edge_turn_angle" />
+        <CheckBoxPreference
+            android:key="checkbox_vr_snap_turn"
+            android:dependency="checkbox_vr_edge_turn"
+            android:title="@string/title_vr_snap_turn"
+            android:summary="@string/summary_vr_snap_turn"
+            android:defaultValue="false"/>
+        <CheckBoxPreference
+            android:key="checkbox_vr_mouse_sync"
+            android:dependency="checkbox_vr_head_mouse"
+            android:title="@string/title_vr_mouse_sync"
+            android:summary="@string/summary_vr_mouse_sync"
+            android:defaultValue="false"/>
         <com.limelight.preferences.SeekBarPreference
             android:key="seekbar_vr_walk_pitch_band"
             android:dependency="checkbox_vr_head_mouse"

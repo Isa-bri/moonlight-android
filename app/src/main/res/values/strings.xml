@@ -291,6 +291,10 @@
     <string name="summary_vr_edge_turn">Turning your head past the limit below keeps the camera spinning on its own, faster the further you go, so you can turn around without twisting your neck. Release Volume Down facing forward to set the center</string>
     <string name="title_vr_edge_turn_angle">VR: edge turn angle</string>
     <string name="summary_vr_edge_turn_angle">Degrees to each side of the center before the camera starts turning by itself</string>
+    <string name="title_vr_snap_turn">VR: turn in steps (snap turn)</string>
+    <string name="summary_vr_snap_turn">Past the edge angle the camera makes one quick 30 degree turn, and only turns again after you bring your head back toward the center, instead of spinning continuously. Easier on the stomach for some people.</string>
+    <string name="title_vr_mouse_sync">VR: send mouse on every sensor sample</string>
+    <string name="summary_vr_mouse_sync">Sends the head movement as soon as each gyro sample arrives, instead of polling every 4 ms (about 13% of polls repeat the previous sample). Experimental: compare how it feels, and the DeckVR log (sem_amostra, periodo_max).</string>
     <string name="title_vr_walk_pitch_band">VR: vertical dead zone while walking</string>
     <string name="summary_vr_walk_pitch_band">Up and down head movement smaller than this is ignored while a walk key is held, so steps do not shake the aim. 0 turns it off</string>
     <string name="title_vr_head_mouse_pitch">VR: head mouse vertical sensitivity</string>

@@ -21,7 +21,6 @@ public class StepWalker implements SensorEventListener {
     private static final short KEY_W = (short) 0x8057;
     private static final long MIN_STEP_INTERVAL_NS = 280_000_000L;
     private static final long RELEASE_AFTER_MS = 650;
-    private static final float NEAR_MISS_FRACTION = 0.6f;
     private static final long LOG_WINDOW_NS = 1_000_000_000L;
 
     private final SensorManager sensorManager;
@@ -32,15 +31,12 @@ public class StepWalker implements SensorEventListener {
     private Handler handler;
 
     // Só usados na thread do sensor
-    private float gravity = SensorManager.GRAVITY_EARTH;
-    private long lastStepNs;
     private volatile boolean down;
     private long lastStepNsWall; // nanoTime do último passo, para a cadência
     private final Runnable release = this::releaseKey;
 
     // Diagnóstico, só na thread do sensor
-    private boolean inBump, bumpStepped, bumpTooSoon;
-    private float bumpPeak;
+    private final StepDetector detector;
     private int walkSteps;
     private long walkStartNs;
     private long winStartNs, winEvents;
@@ -51,6 +47,7 @@ public class StepWalker implements SensorEventListener {
         this.sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         this.conn = conn;
         this.thresholdMs2 = thresholdMs2;
+        this.detector = new StepDetector(thresholdMs2, MIN_STEP_INTERVAL_NS);
     }
 
     public boolean start() {
@@ -95,15 +92,8 @@ public class StepWalker implements SensorEventListener {
 
     @Override
     public void onSensorChanged(SensorEvent event) {
-        float x = event.values[0], y = event.values[1], z = event.values[2];
-        float mag = (float) Math.sqrt(x * x + y * y + z * z);
-        gravity += 0.05f * (mag - gravity);
-        float excess = mag - gravity;
-        boolean step = false;
-        if (excess > thresholdMs2 && event.timestamp - lastStepNs > MIN_STEP_INTERVAL_NS) {
-            step = true;
-            long sinceMs = lastStepNs == 0 ? -1 : (event.timestamp - lastStepNs) / 1_000_000;
-            lastStepNs = event.timestamp;
+        boolean step = detector.onSample(event.values[0], event.values[1], event.values[2], event.timestamp);
+        if (step) {
             lastStepNsWall = System.nanoTime();
             if (!down) {
                 down = true;
@@ -116,46 +106,28 @@ public class StepWalker implements SensorEventListener {
             winSteps++;
             handler.removeCallbacks(release);
             handler.postDelayed(release, RELEASE_AFTER_MS);
-            VrLog.i("PASSO", "passo pico=%.2fm/s2 limiar=%.1f intervalo=%dms", excess, thresholdMs2, sinceMs);
+            VrLog.i("PASSO", "passo pico=%.2fm/s2 limiar=%.1f intervalo=%dms", detector.excess, thresholdMs2,
+                    detector.sinceLastStepMs);
         }
-        // Pico bom, mas dentro dos 280 ms do passo anterior
-        trackBump(excess, step, !step && excess > thresholdMs2, event.timestamp);
+        if (detector.bumpWasMiss) {
+            winNearMiss++;
+            VrLog.i("PASSO", "quase passo pico=%.2fm/s2 limiar=%.1f motivo=%s", detector.missPeak, thresholdMs2,
+                    detector.missTooSoon ? "perto_do_passo_anterior" : "abaixo_do_limiar");
+        }
+        logWindow(detector.excess, event.timestamp);
     }
 
-    // Agrupa as amostras acima de 60% do limiar em "solavancos": se nenhum virou passo, é um quase passo
-    // (perdido por sensibilidade ou por intervalo curto). Os picos guiam o ajuste de "step sensitivity".
-    private void trackBump(float excess, boolean step, boolean tooSoon, long ts) {
+    private void logWindow(float excess, long ts) {
         winEvents++;
         winMaxExcess = Math.max(winMaxExcess, excess);
-        float floor = thresholdMs2 * NEAR_MISS_FRACTION;
-        if (excess > floor) {
-            if (!inBump) {
-                inBump = true;
-                bumpPeak = 0;
-                bumpStepped = false;
-                bumpTooSoon = false;
-            }
-            bumpPeak = Math.max(bumpPeak, excess);
-            bumpStepped |= step;
-            bumpTooSoon |= tooSoon;
-        }
-        else if (inBump) {
-            inBump = false;
-            if (!bumpStepped) {
-                winNearMiss++;
-                VrLog.i("PASSO", "quase passo pico=%.2fm/s2 limiar=%.1f motivo=%s", bumpPeak, thresholdMs2,
-                        bumpTooSoon ? "perto_do_passo_anterior" : "abaixo_do_limiar");
-            }
-        }
-
         if (winStartNs == 0) {
             winStartNs = ts;
         }
         long span = ts - winStartNs;
         if (span >= LOG_WINDOW_NS) {
-            if (winSteps > 0 || winNearMiss > 0 || winMaxExcess > floor) {
+            if (winSteps > 0 || winNearMiss > 0 || winMaxExcess > thresholdMs2 * StepDetector.NEAR_MISS_FRACTION) {
                 VrLog.i("PASSO", "resumo amostras=%.0f/s passos=%d quase=%d pico_max=%.2fm/s2 gravidade=%.2f andando=%b",
-                        winEvents * 1e9 / span, winSteps, winNearMiss, winMaxExcess, gravity, down);
+                        winEvents * 1e9 / span, winSteps, winNearMiss, winMaxExcess, detector.gravity(), down);
             }
             winStartNs = ts;
             winEvents = 0;

@@ -13,11 +13,11 @@ import com.limelight.nvstream.NvConnection;
 // HeadTracker (rotação em torno de Z) não altera yaw/pitch relativos. Girar para a direita move o mouse
 // para a direita; olhar para cima move o mouse para cima (y positivo é para baixo).
 //
-// Giro na borda: passando de `edgeDeg` graus para um lado do ponto central (onde a cabeça estava ao começar ou ao soltar
-// a embreagem), a câmera continua girando sozinha, mais rápido quanto mais longe, para virar além do alcance do pescoço.
+// A matemática (giro na borda contínuo ou em passos, zona morta vertical ao andar, congelar o yaw olhando reto para
+// cima/baixo) está em HeadMotion, sem Android. Aqui ficam o sensor, a thread, o envio e o log.
 //
-// Zona morta vertical ao andar: enquanto andar (W/A/S/D segurado por outra classe) o pitch só passa depois de sair de
-// uma faixa de `walkPitchBandDeg` graus em volta da última posição, o que esconde o balanço da cabeça a cada passo.
+// Ritmo: por padrão um tick a cada 4 ms (~250 Hz, acima do sensor de ~200 Hz, então ~13% dos ticks releem a mesma
+// amostra). Com `syncToSensor` não há tick: cada amostra nova do sensor dispara um poll, sem leitura repetida.
 //
 // Diagnóstico (VrLog, linha HM uma vez por segundo + eventos): os contadores ficam só na thread do tick; nada é
 // impresso por tick. Campos da linha HM:
@@ -36,42 +36,28 @@ public class HeadMouse {
     }
 
     private static final long PERIOD_MS = 4; // ~250 Hz, acima do sensor (~200 Hz)
-    private static final float DEADZONE_DEG = 0.005f;
-    private static final float EDGE_RAMP_DEG = 15f;       // da borda até a velocidade máxima
-    private static final float EDGE_MAX_DEG_PER_S = 120f; // velocidade máxima do giro na borda
 
     private static final long LOG_WINDOW_NS = 1_000_000_000L;
     private static final long LATE_TICK_NS = 2 * PERIOD_MS * 1_000_000L;
-    private static final float JUMP_DEG = 3f;       // giro por tick que não é de cabeça humana
     private static final int VERBOSE_SPIKE_LIMIT = 10; // linhas de pico por segundo no modo verbose
 
     private final HeadTracker tracker;
     private final NvConnection conn;
-    private final float countsPerDegree;
-    private final float pitchCountsPerDegree;
+    private final HeadMotion motion;
 
     private HandlerThread thread;
     private Handler handler;
     private volatile boolean running;
     private volatile boolean toggledPause;
     private volatile boolean clutch;
-
-    private final float[] worldToEye = new float[16];
-    private boolean hasPrev;
-    private float prevYaw, prevPitch;
-    private float remX, remY;
-    private float centerYaw;
-    private long prevNs;
-    private float anchorPitch;
-    private boolean wasWalking;
-
-    private volatile float edgeDeg;          // 0 = desligado
-    private volatile float walkPitchBandDeg; // 0 = desligado
+    private volatile boolean syncToSensor;
     private volatile WalkSource walkSource;
 
-    // Diagnóstico, só na thread do tick
+    private final float[] worldToEye = new float[16];
+
+    // Diagnóstico, só na thread do poll
     private long winStartNs, lastPollNs;
-    private int sTicks, sLate, sStale, sPaused, sSent, sOnes, sFlips, sJumps, sDeadzone, sClamp, sSpikeLogs;
+    private int sTicks, sLate, sStale, sPaused, sSent, sOnes, sFlips, sJumps, sDeadzone, sClamp, sGimbal, sSpikeLogs;
     private long sMaxPeriodNs, sAgeMaxNs, sSendSumNs, sSendMaxNs, sEdgeNs, sWalkNs;
     private long sSumX, sSumY;
     private int sMaxX, sMaxY, lastSignX;
@@ -79,15 +65,13 @@ public class HeadMouse {
     private long pausedSinceNs;
     private float pausedYaw, pausedPitch;
     private boolean pausedByClutch;
-    private boolean edgeActive;
-    private long edgeStartNs;
-    private float edgeTurned;
-    private long walkStartNs;
-    private float walkAbsorbed;
+    private boolean inEdge;
 
-    // Só para testes por broadcast: soma um desvio fixo e uma oscilação de pitch à leitura do sensor e pode fingir que anda
+    // Só para testes por broadcast: soma um desvio fixo e uma oscilação de pitch à leitura do sensor e pode fingir que anda.
+    // Zerar os desvios recentra (senão o centro do giro na borda fica no desvio antigo e o mouse anda sozinho).
     private volatile float testYaw, testPitch, testBobAmp, testBobHz;
     private volatile boolean testWalking;
+    private volatile boolean testChanged;
 
     private final Runnable tick = new Runnable() {
         @Override
@@ -100,15 +84,33 @@ public class HeadMouse {
         }
     };
 
+    private final Runnable pollOnce = new Runnable() {
+        @Override
+        public void run() {
+            if (running) {
+                poll();
+            }
+        }
+    };
+
     public HeadMouse(Context context, NvConnection conn, float countsPerDegree, float pitchScale) {
         this.tracker = new HeadTracker(context, "MOUSE");
         this.conn = conn;
-        this.countsPerDegree = countsPerDegree;
-        this.pitchCountsPerDegree = countsPerDegree * pitchScale;
+        this.motion = new HeadMotion(countsPerDegree, pitchScale);
     }
 
     public void setEdgeTurn(float edgeDeg) {
-        this.edgeDeg = edgeDeg;
+        motion.edgeDeg = edgeDeg;
+    }
+
+    // Com o giro na borda ligado, vira em passos fixos em vez de contínuo
+    public void setSnapTurn(boolean snap) {
+        motion.snapTurn = snap;
+    }
+
+    // Um poll a cada amostra do sensor, em vez de um tick de 4 ms (chamar antes de start())
+    public void setSyncToSensor(boolean sync) {
+        syncToSensor = sync;
     }
 
     public void setTestOffsets(float yaw, float pitch, float bobAmp, float bobHz, boolean walking) {
@@ -117,28 +119,37 @@ public class HeadMouse {
         testBobAmp = bobAmp;
         testBobHz = bobHz;
         testWalking = walking;
+        testChanged = yaw == 0 && pitch == 0 && bobAmp == 0 && !walking;
     }
 
     public void setWalkPitchBand(float bandDeg, WalkSource source) {
-        this.walkPitchBandDeg = bandDeg;
+        motion.walkPitchBandDeg = bandDeg;
         this.walkSource = source;
     }
 
     public boolean start() {
-        if (!tracker.start()) {
-            return false;
-        }
         thread = new HandlerThread("DeckVR-HeadMouse", Process.THREAD_PRIORITY_URGENT_DISPLAY);
         thread.start();
         handler = new Handler(thread.getLooper());
+        if (syncToSensor) {
+            tracker.setSampleListener(() -> handler.post(pollOnce));
+        }
+        if (!tracker.start()) {
+            thread.quitSafely();
+            thread = null;
+            return false;
+        }
         running = true;
-        handler.post(tick);
+        if (!syncToSensor) {
+            handler.post(tick);
+        }
         return true;
     }
 
     public void stop() {
         running = false;
         VrLog.i("HM", "parou");
+        tracker.setSampleListener(null);
         tracker.stop();
         if (thread != null) {
             thread.quitSafely();
@@ -178,6 +189,7 @@ public class HeadMouse {
         float gz = -worldToEye[10];
         float yaw = (float) Math.toDegrees(Math.atan2(gx, gy));
         float pitch = (float) Math.toDegrees(Math.asin(Math.max(-1f, Math.min(1f, gz))));
+        float horizLen = (float) Math.hypot(gx, gy);
 
         if (toggledPause || clutch) {
             if (pausedSinceNs == 0) {
@@ -185,9 +197,10 @@ public class HeadMouse {
                 pausedYaw = yaw;
                 pausedPitch = pitch;
                 pausedByClutch = clutch;
-                endEdge(nowNs, "pausa");
+                motion.endEdge(nowNs);
+                logEdge(nowNs, "pausa");
             }
-            hasPrev = false;
+            motion.invalidate();
             sPaused++;
             logWindow(nowNs);
             return;
@@ -196,101 +209,58 @@ public class HeadMouse {
             // A câmera retoma da pose atual, sem pulo: o giro feito durante a pausa é o que "levantar o mouse" reposicionou
             VrLog.i("HM", "retomou motivo=%s pausa=%.1fs giro_na_pausa yaw=%+.1f pitch=%+.1f graus",
                     pausedByClutch ? "embreagem" : "pausa", (nowNs - pausedSinceNs) / 1e9,
-                    wrap(yaw - pausedYaw), pitch - pausedPitch);
+                    HeadMotion.wrap(yaw - pausedYaw), pitch - pausedPitch);
             pausedSinceNs = 0;
+        }
+        if (testChanged) {
+            testChanged = false;
+            motion.invalidate();
         }
 
         yaw += testYaw;
+        // Teste por broadcast com o celular deitado: o yaw congelaria (olhar reto para baixo); finge olhar na horizontal
+        if (testYaw != 0 || testPitch != 0 || testBobAmp != 0) horizLen = 1f;
         pitch += testPitch + testBobAmp * (float) Math.sin(2 * Math.PI * testBobHz * nowNs / 1e9);
-        if (!hasPrev) {
-            prevYaw = yaw;
-            prevPitch = pitch;
-            centerYaw = yaw;
-            anchorPitch = pitch;
-            wasWalking = false;
-            prevNs = nowNs;
-            hasPrev = true;
+
+        WalkSource source = walkSource;
+        boolean walking = testWalking || (source != null && source.isWalking());
+        if (!motion.update(yaw, pitch, horizLen, nowNs, walking)) {
+            logEdge(nowNs, "recentrou");
+            if (motion.walkEvent == HeadMotion.EVENT_ENDED) {
+                VrLog.i("HM", "andando fim (recentrou) duracao=%.1fs pitch_engolido=%.1f graus", motion.eventSeconds, motion.eventAbsorbed);
+            }
             VrLog.i("HM", "centro yaw=%+.1f pitch=%+.1f", yaw, pitch);
             logWindow(nowNs);
             return;
         }
-        float dt = Math.min((nowNs - prevNs) / 1e9f, 0.05f);
-        long dtNs = nowNs - prevNs;
-        prevNs = nowNs;
 
-        float dYaw = wrap(yaw - prevYaw);
-        float dPitch = pitch - prevPitch;
-        prevYaw = yaw;
-        prevPitch = pitch;
-
-        if (Math.abs(dYaw) > JUMP_DEG || Math.abs(dPitch) > JUMP_DEG) {
+        if (motion.jump) {
             sJumps++;
-            spike("pulo giro yaw=%+.2f pitch=%+.2f em %.1fms idade=%.1fms", dYaw, dPitch, dtNs / 1e6,
-                    tracker.lastReadAgeNs() / 1e6);
+            spike("pulo giro yaw=%+.2f pitch=%+.2f em %.1fms idade=%.1fms", motion.rawDYaw, motion.rawDPitch,
+                    motion.dtNs / 1e6, tracker.lastReadAgeNs() / 1e6);
         }
-
-        // Ao andar, o pitch só segue quando sai da faixa em volta da âncora
-        WalkSource source = walkSource;
-        boolean walking = walkPitchBandDeg > 0 && (testWalking || (source != null && source.isWalking()));
-        if (walking) {
-            float rawPitch = dPitch;
-            if (!wasWalking) {
-                anchorPitch = pitch - dPitch;
-                walkStartNs = nowNs;
-                walkAbsorbed = 0;
-            }
-            float band = walkPitchBandDeg;
-            float before = anchorPitch;
-            if (pitch > anchorPitch + band) anchorPitch = pitch - band;
-            else if (pitch < anchorPitch - band) anchorPitch = pitch + band;
-            dPitch = anchorPitch - before;
-            float absorbed = Math.abs(rawPitch - dPitch);
-            sBandAbsorbed += absorbed;
-            walkAbsorbed += absorbed;
-            sWalkNs += dtNs;
-        }
-        else if (wasWalking) {
+        if (motion.gimbalFrozen) sGimbal++;
+        if (motion.walkEvent == HeadMotion.EVENT_ENDED) {
             VrLog.i("HM", "andando fim duracao=%.1fs pitch_engolido=%.1f graus banda=%.1f",
-                    (nowNs - walkStartNs) / 1e9, walkAbsorbed, walkPitchBandDeg);
+                    motion.eventSeconds, motion.eventAbsorbed, motion.walkPitchBandDeg);
         }
-        wasWalking = walking;
-
-        // Giro na borda: soma uma rotação contínua de yaw quando a cabeça passa do limite
-        float edgeYaw = 0;
-        float edge = edgeDeg;
-        if (edge > 0) {
-            float rel = wrap(yaw - centerYaw);
-            float excess = Math.abs(rel) - edge;
-            if (excess > 0) {
-                float speed = Math.min(excess / EDGE_RAMP_DEG, 1f) * EDGE_MAX_DEG_PER_S;
-                edgeYaw = Math.signum(rel) * speed * dt;
-                if (!edgeActive) {
-                    edgeActive = true;
-                    edgeStartNs = nowNs;
-                    edgeTurned = 0;
-                    VrLog.i("HM", "borda entrou rel=%+.1f limite=%.0f graus", rel, edge);
-                }
-                edgeTurned += Math.abs(edgeYaw);
-                sEdgeNs += dtNs;
-            }
-            else {
-                endEdge(nowNs, "voltou");
-            }
+        sBandAbsorbed += motion.absorbedPitch;
+        if (motion.walkPitchBandDeg > 0 && walking) sWalkNs += motion.dtNs;
+        if (motion.edgeEvent == HeadMotion.EVENT_STARTED) {
+            inEdge = true;
+            VrLog.i("HM", "borda entrou rel=%+.1f limite=%.0f graus modo=%s", motion.eventRel, motion.edgeDeg,
+                    motion.snapTurn ? "passos" : "continuo");
         }
+        else {
+            logEdge(nowNs, "voltou");
+        }
+        if (inEdge) sEdgeNs += motion.dtNs;
 
-        if (dYaw != 0 && Math.abs(dYaw) < DEADZONE_DEG) { dYaw = 0; sDeadzone++; }
-        if (dPitch != 0 && Math.abs(dPitch) < DEADZONE_DEG) { dPitch = 0; sDeadzone++; }
-        sYawPath += Math.abs(dYaw);
-        sPitchPath += Math.abs(dPitch);
+        sDeadzone += motion.deadzoneHits;
+        sYawPath += Math.abs(motion.dYaw);
+        sPitchPath += Math.abs(motion.dPitch);
 
-        // Guarda a fração que não cabe num inteiro para não perder movimento lento
-        remX += (dYaw + edgeYaw) * countsPerDegree;
-        remY += -dPitch * pitchCountsPerDegree;
-        int mx = (int) remX;
-        int my = (int) remY;
-        remX -= mx;
-        remY -= my;
-
+        int mx = motion.mx, my = motion.my;
         if (mx != 0 || my != 0) {
             if (Math.abs(mx) > 32767 || Math.abs(my) > 32767) sClamp++;
             long t0 = System.nanoTime();
@@ -319,20 +289,16 @@ public class HeadMouse {
         logWindow(nowNs);
     }
 
-    private static float wrap(float deg) {
-        if (deg > 180f) return deg - 360f;
-        if (deg < -180f) return deg + 360f;
-        return deg;
-    }
-
-    private void endEdge(long nowNs, String why) {
-        if (edgeActive) {
-            edgeActive = false;
-            VrLog.i("HM", "borda saiu (%s) duracao=%.1fs girou=%.0f graus", why, (nowNs - edgeStartNs) / 1e9, edgeTurned);
+    // Registra o fim do giro da borda (depois de motion.update() ou motion.endEdge())
+    private void logEdge(long nowNs, String why) {
+        if (motion.edgeEvent == HeadMotion.EVENT_ENDED) {
+            inEdge = false;
+            VrLog.i("HM", "borda saiu (%s) duracao=%.1fs girou=%.0f graus", why, motion.eventSeconds, motion.eventTurned);
+            motion.edgeEvent = HeadMotion.EVENT_NONE;
         }
     }
 
-    // Período entre ticks seguidos: o laço de 4 ms devia ficar perto de 4 ms
+    // Período entre polls seguidos: no modo por tempo devia ficar perto de 4 ms; no sincronizado, perto de 5 ms (200 Hz)
     private void countTick(long nowNs) {
         sTicks++;
         if (lastPollNs != 0) {
@@ -365,13 +331,13 @@ public class HeadMouse {
         }
         VrLog.i("HM", "ticks=%d periodo_max=%.1fms atrasados=%d sem_amostra=%d idade_max=%.1fms enviados=%d pausados=%d "
                         + "soma=%d,%d max=%d,%d uns=%d inversoes=%d pulos=%d zona=%d clamp=%d percorrido=%.1f,%.1f "
-                        + "envio_med=%.3fms envio_max=%.2fms borda=%d andando=%d banda=%.2f",
+                        + "envio_med=%.3fms envio_max=%.2fms borda=%d andando=%d banda=%.2f congelado=%d sync=%b",
                 sTicks, sMaxPeriodNs / 1e6, sLate, sStale, sAgeMaxNs / 1e6, sSent, sPaused,
                 sSumX, sSumY, sMaxX, sMaxY, sOnes, sFlips, sJumps, sDeadzone, sClamp, sYawPath, sPitchPath,
                 sSent > 0 ? sSendSumNs / 1e6 / sSent : 0.0, sSendMaxNs / 1e6,
-                sEdgeNs / 1_000_000, sWalkNs / 1_000_000, sBandAbsorbed);
+                sEdgeNs / 1_000_000, sWalkNs / 1_000_000, sBandAbsorbed, sGimbal, syncToSensor);
         winStartNs = nowNs;
-        sTicks = sLate = sStale = sPaused = sSent = sOnes = sFlips = sJumps = sDeadzone = sClamp = sSpikeLogs = 0;
+        sTicks = sLate = sStale = sPaused = sSent = sOnes = sFlips = sJumps = sDeadzone = sClamp = sGimbal = sSpikeLogs = 0;
         sMaxPeriodNs = sAgeMaxNs = sSendSumNs = sSendMaxNs = sEdgeNs = sWalkNs = 0;
         sSumX = sSumY = 0;
         sMaxX = sMaxY = 0;

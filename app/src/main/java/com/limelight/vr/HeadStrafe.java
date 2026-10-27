@@ -14,8 +14,8 @@ import com.limelight.nvstream.input.KeyboardPacket;
 // segurada (troca em menos de 250 ms vira "TREME": limiar ou histerese apertados demais para o balanço da cabeça);
 // por segundo, a rolagem mínima/máxima, que só aparece quando chegou a metade do limiar ou há tecla segurada.
 public class HeadStrafe {
-    private static final short KEY_A = (short) 0x8041;
-    private static final short KEY_D = (short) 0x8044;
+    static final short KEY_A = (short) 0x8041;
+    static final short KEY_D = (short) 0x8044;
     private static final float HYSTERESIS_DEG = 5f;
     private static final long TICK_MS = 20;
     private static final long CHATTER_MS = 250;
@@ -69,18 +69,24 @@ public class HeadStrafe {
             // Eixo "direita" do olho no mundo = linha 0 de worldToEye; sua altura é o seno da rolagem
             // (positivo = orelha direita para cima = cabeça inclinada para a esquerda)
             float roll = (float) Math.toDegrees(Math.asin(Math.max(-1f, Math.min(1f, worldToEye[8]))));
-            short want = held;
-            float release = thresholdDeg - HYSTERESIS_DEG;
-            if (roll > thresholdDeg) want = KEY_A;
-            else if (roll < -thresholdDeg) want = KEY_D;
-            else if (held == KEY_A && roll < release) want = 0;
-            else if (held == KEY_D && roll > -release) want = 0;
+            short want = nextKey(roll, held, thresholdDeg, HYSTERESIS_DEG);
             set(want, roll);
             logRoll(roll);
         }
         if (handler != null) {
             handler.postDelayed(this::tick, TICK_MS);
         }
+    }
+
+    // Tecla a segurar para esta rolagem (positiva = inclinada para a esquerda): passa do limiar liga; só solta
+    // depois de voltar `hysteresis` graus para dentro dele
+    static short nextKey(float roll, short held, float thresholdDeg, float hysteresis) {
+        float release = thresholdDeg - hysteresis;
+        if (roll > thresholdDeg) return KEY_A;
+        if (roll < -thresholdDeg) return KEY_D;
+        if (held == KEY_A && roll < release) return 0;
+        if (held == KEY_D && roll > -release) return 0;
+        return held;
     }
 
     private void logRoll(float roll) {

@@ -31,6 +31,7 @@ public class HeadTracker implements SensorEventListener {
     private final SensorManager sensorManager;
     private final WindowManager windowManager;
     private final String label;
+    private volatile Runnable sampleListener;
 
     private HandlerThread thread;
 
@@ -116,6 +117,11 @@ public class HeadTracker implements SensorEventListener {
         VrLog.i("SENSOR", "[%s] recentrar pedido", label);
     }
 
+    // Chamado na thread do sensor a cada amostra nova (para quem quer reagir ao sensor em vez de sondar por tempo)
+    public void setSampleListener(Runnable listener) {
+        sampleListener = listener;
+    }
+
     // A última leitura de getWorldToEye() trouxe uma amostra nova do sensor? (mesma thread de getWorldToEye)
     public boolean lastReadFresh() {
         synchronized (lock) {
@@ -193,7 +199,8 @@ public class HeadTracker implements SensorEventListener {
     @Override
     public void onSensorChanged(SensorEvent event) {
         long events = 0, maxGap = 0, reads = 0, stale = 0, ageSum = 0, ageMax = 0, windowNs = 0;
-        int acc;
+        int acc = 0;
+        boolean logNow;
         synchronized (lock) {
             rawLength = Math.min(event.values.length, rawVector.length);
             System.arraycopy(event.values, 0, rawVector, 0, rawLength);
@@ -210,18 +217,25 @@ public class HeadTracker implements SensorEventListener {
                 winStartNs = event.timestamp;
             }
             windowNs = event.timestamp - winStartNs;
-            if (windowNs < LOG_WINDOW_NS) {
-                return;
+            logNow = windowNs >= LOG_WINDOW_NS;
+            if (logNow) {
+                events = winEvents;
+                maxGap = winMaxGapNs;
+                reads = winReads;
+                stale = winStale;
+                ageSum = winAgeSumNs;
+                ageMax = winAgeMaxNs;
+                acc = accuracy;
+                winStartNs = event.timestamp;
+                winEvents = winMaxGapNs = winReads = winStale = winAgeSumNs = winAgeMaxNs = 0;
             }
-            events = winEvents;
-            maxGap = winMaxGapNs;
-            reads = winReads;
-            stale = winStale;
-            ageSum = winAgeSumNs;
-            ageMax = winAgeMaxNs;
-            acc = accuracy;
-            winStartNs = event.timestamp;
-            winEvents = winMaxGapNs = winReads = winStale = winAgeSumNs = winAgeMaxNs = 0;
+        }
+        Runnable listener = sampleListener;
+        if (listener != null) {
+            listener.run();
+        }
+        if (!logNow) {
+            return;
         }
         VrLog.i("SENSOR", "[%s] eventos=%.0f/s gap_max=%.1fms leituras=%d repetidas=%d idade_med=%.2fms idade_max=%.2fms precisao=%d",
                 label, events * 1e9 / windowNs, maxGap / 1e6, reads, stale,
