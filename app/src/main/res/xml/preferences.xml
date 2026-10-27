@@ -293,6 +293,18 @@
             android:summary="@string/summary_vr_screen_height"
             android:text="@string/suffix_vr_screen_meters"
             android:title="@string/title_vr_screen_height" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_lens_distortion"
+            android:dependency="checkbox_vr_cinema"
+            android:defaultValue="0"
+            seekbar:min="0"
+            android:max="60"
+            seekbar:step="1"
+            seekbar:divisor="100"
+            android:dialogMessage="@string/summary_vr_lens_distortion"
+            android:summary="@string/summary_vr_lens_distortion"
+            android:text="@string/suffix_vr_lens_k"
+            android:title="@string/title_vr_lens_distortion" />
         <CheckBoxPreference
             android:key="checkbox_vr_head_mouse"
             android:dependency="checkbox_vr_cinema"

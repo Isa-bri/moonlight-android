@@ -54,6 +54,31 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
             "  gl_FragColor = texture2D(uTex, vTex);\n" +
             "}\n";
 
+    // Passe de distorção: lê a cena do olho (textura 2D) e a deforma em "barril" para cancelar a
+    // almofada das lentes. s = p * (1 + k1 r^2), com p em [-1, 1] centrado na lente
+    private static final String DIST_VERTEX_SHADER =
+            "attribute vec2 aPos;\n" +
+            "varying vec2 vPos;\n" +
+            "void main() {\n" +
+            "  gl_Position = vec4(aPos, 0.0, 1.0);\n" +
+            "  vPos = aPos;\n" +
+            "}\n";
+
+    private static final String DIST_FRAGMENT_SHADER =
+            "precision mediump float;\n" +
+            "uniform sampler2D uScene;\n" +
+            "uniform float uK1;\n" +
+            "varying vec2 vPos;\n" +
+            "void main() {\n" +
+            "  float r2 = dot(vPos, vPos);\n" +
+            "  vec2 s = vPos * (1.0 + uK1 * r2) * 0.5 + 0.5;\n" +
+            "  if (s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0) {\n" +
+            "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n" +
+            "  } else {\n" +
+            "    gl_FragColor = texture2D(uScene, s);\n" +
+            "  }\n" +
+            "}\n";
+
     private static final float[] QUAD = {-1, -1, 1, -1, -1, 1, 1, 1};
 
     // Campo de visão vertical por olho e distância entre os olhos (valores provisórios até a etapa 4).
@@ -66,6 +91,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
     private final int videoHeight;
     private final boolean measureLatency;
     private final boolean headTracking;
+    private final float lensK1;
     private final HeadTracker headTracker;
     private final SurfaceListener listener;
     private final FloatBuffer quad;
@@ -85,6 +111,14 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
     private int posLoc;
     private int texMatrixLoc;
     private int mvpLoc;
+    private int distProgram;
+    private int distPosLoc;
+    private int distSceneLoc;
+    private int distK1Loc;
+    private int fbo;
+    private int fboTex;
+    private int fboWidth;
+    private int fboHeight;
     private int viewWidth;
     private int viewHeight;
     private volatile boolean frameAvailable;
@@ -99,12 +133,13 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
     // screenDistance e screenHeight (metros) definem a tela virtual do modo cinema; a largura vem da proporção do vídeo
     public StereoGLView(Context context, int videoWidth, int videoHeight, boolean measureLatency,
-                        boolean headTracking, float screenDistance, float screenHeight, SurfaceListener listener) {
+                        boolean headTracking, float screenDistance, float screenHeight, float lensK1, SurfaceListener listener) {
         super(context);
         this.videoWidth = videoWidth;
         this.videoHeight = videoHeight;
         this.measureLatency = measureLatency;
         this.listener = listener;
+        this.lensK1 = lensK1;
 
         Matrix.setIdentityM(identity, 0);
 
@@ -198,10 +233,18 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         EGL14.eglSwapInterval(EGL14.eglGetCurrentDisplay(), 0);
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
 
-        program = buildProgram();
+        program = buildProgram(VERTEX_SHADER, FRAGMENT_SHADER);
         posLoc = GLES20.glGetAttribLocation(program, "aPos");
         texMatrixLoc = GLES20.glGetUniformLocation(program, "uTexMatrix");
         mvpLoc = GLES20.glGetUniformLocation(program, "uMvp");
+
+        distProgram = buildProgram(DIST_VERTEX_SHADER, DIST_FRAGMENT_SHADER);
+        distPosLoc = GLES20.glGetAttribLocation(distProgram, "aPos");
+        distSceneLoc = GLES20.glGetUniformLocation(distProgram, "uScene");
+        distK1Loc = GLES20.glGetUniformLocation(distProgram, "uK1");
+        fbo = 0;
+        fboTex = 0;
+        fboWidth = fboHeight = 0;
 
         int[] tex = new int[1];
         GLES20.glGenTextures(1, tex, 0);
@@ -250,6 +293,36 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         GLES20.glClearColor(0, 0, 0, 1);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
+        int eyeWidth = viewWidth / 2;
+        boolean tracked = headTracking && headTracker.getWorldToEye(worldToEye);
+        if (tracked) {
+            Matrix.perspectiveM(projection, 0, FOV_Y_DEGREES, (float) eyeWidth / viewHeight, 0.1f, 20f);
+        }
+        boolean distort = lensK1 > 0 && ensureFbo(eyeWidth, viewHeight);
+
+        for (int eye = 0; eye < 2; eye++) {
+            if (distort) {
+                // Cena do olho na textura; depois ela é deformada para a metade da tela
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo);
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+                drawEye(eye, 0, eyeWidth, tracked);
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+                drawDistorted(eye * eyeWidth, eyeWidth);
+            }
+            else {
+                drawEye(eye, eye * eyeWidth, eyeWidth, tracked);
+            }
+        }
+
+        // Só mede desenhos que consumiram um quadro novo (não os de rotação/redimensionamento)
+        if (measureLatency && newFrame) {
+            GLES20.glFinish();
+            recordLatency(System.nanoTime() - frameAvailableNs);
+        }
+    }
+
+    // Cena de um olho na região [x, x + width) x [0, viewHeight) do framebuffer atual
+    private void drawEye(int eye, int x, int width, boolean tracked) {
         GLES20.glUseProgram(program);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texId);
@@ -257,48 +330,80 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         GLES20.glEnableVertexAttribArray(posLoc);
         GLES20.glVertexAttribPointer(posLoc, 2, GLES20.GL_FLOAT, false, 0, quad);
 
-        int eyeWidth = viewWidth / 2;
-        if (headTracking && headTracker.getWorldToEye(worldToEye)) {
+        if (tracked) {
             // Tela virtual no mundo; cada olho enxerga a partir do seu lado (±IPD/2)
-            Matrix.perspectiveM(projection, 0, FOV_Y_DEGREES, (float) eyeWidth / viewHeight, 0.1f, 20f);
-            for (int eye = 0; eye < 2; eye++) {
-                float shift = (eye == 0 ? 1 : -1) * IPD / 2;
-                Matrix.setIdentityM(eyeShift, 0);
-                Matrix.translateM(eyeShift, 0, shift, 0, 0);
-                Matrix.multiplyMM(eyeView, 0, eyeShift, 0, worldToEye, 0);
-                Matrix.multiplyMM(mvp, 0, eyeView, 0, screenModel, 0);
-                Matrix.multiplyMM(mvp, 0, projection, 0, mvp, 0);
+            float shift = (eye == 0 ? 1 : -1) * IPD / 2;
+            Matrix.setIdentityM(eyeShift, 0);
+            Matrix.translateM(eyeShift, 0, shift, 0, 0);
+            Matrix.multiplyMM(eyeView, 0, eyeShift, 0, worldToEye, 0);
+            Matrix.multiplyMM(mvp, 0, eyeView, 0, screenModel, 0);
+            Matrix.multiplyMM(mvp, 0, projection, 0, mvp, 0);
 
-                GLES20.glViewport(eye * eyeWidth, 0, eyeWidth, viewHeight);
-                GLES20.glUniformMatrix4fv(mvpLoc, 1, false, mvp, 0);
-                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-            }
+            GLES20.glViewport(x, 0, width, viewHeight);
+            GLES20.glUniformMatrix4fv(mvpLoc, 1, false, mvp, 0);
         }
         else {
-            // Cada olho recebe metade da tela; dentro dela o vídeo ocupa o maior retângulo
-            // com a proporção original (barras pretas no resto)
+            // O vídeo ocupa o maior retângulo com a proporção original (barras pretas no resto)
             float videoAspect = (float) videoWidth / videoHeight;
-            int w = eyeWidth;
+            int w = width;
             int h = (int) (w / videoAspect);
             if (h > viewHeight) {
                 h = viewHeight;
                 w = (int) (h * videoAspect);
             }
-            int y = (viewHeight - h) / 2;
+            GLES20.glViewport(x + (width - w) / 2, (viewHeight - h) / 2, w, h);
             GLES20.glUniformMatrix4fv(mvpLoc, 1, false, identity, 0);
-            for (int eye = 0; eye < 2; eye++) {
-                GLES20.glViewport(eye * eyeWidth + (eyeWidth - w) / 2, y, w, h);
-                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-            }
         }
-
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
         GLES20.glDisableVertexAttribArray(posLoc);
+    }
 
-        // Só mede desenhos que consumiram um quadro novo (não os de rotação/redimensionamento)
-        if (measureLatency && newFrame) {
-            GLES20.glFinish();
-            recordLatency(System.nanoTime() - frameAvailableNs);
+    private void drawDistorted(int x, int width) {
+        GLES20.glUseProgram(distProgram);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, fboTex);
+        GLES20.glUniform1i(distSceneLoc, 0);
+        GLES20.glUniform1f(distK1Loc, lensK1);
+        GLES20.glEnableVertexAttribArray(distPosLoc);
+        GLES20.glVertexAttribPointer(distPosLoc, 2, GLES20.GL_FLOAT, false, 0, quad);
+        GLES20.glViewport(x, 0, width, viewHeight);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
+        GLES20.glDisableVertexAttribArray(distPosLoc);
+    }
+
+    // Framebuffer com uma textura do tamanho de um olho; false se o aparelho não o aceitar
+    private boolean ensureFbo(int width, int height) {
+        if (fbo != 0 && fboWidth == width && fboHeight == height) {
+            return true;
         }
+        int[] id = new int[1];
+        if (fboTex == 0) {
+            GLES20.glGenTextures(1, id, 0);
+            fboTex = id[0];
+        }
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, fboTex);
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, width, height, 0,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        if (fbo == 0) {
+            GLES20.glGenFramebuffers(1, id, 0);
+            fbo = id[0];
+        }
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo);
+        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                GLES20.GL_TEXTURE_2D, fboTex, 0);
+        boolean ok = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE;
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        if (!ok) {
+            Log.w("DeckVR", "Framebuffer incompleto; sem correção de distorção");
+            return false;
+        }
+        fboWidth = width;
+        fboHeight = height;
+        return true;
     }
 
     private void recordLatency(long ns) {
@@ -319,9 +424,9 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         }
     }
 
-    private static int buildProgram() {
-        int vs = compile(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER);
-        int fs = compile(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER);
+    private static int buildProgram(String vertexSource, String fragmentSource) {
+        int vs = compile(GLES20.GL_VERTEX_SHADER, vertexSource);
+        int fs = compile(GLES20.GL_FRAGMENT_SHADER, fragmentSource);
         int prog = GLES20.glCreateProgram();
         GLES20.glAttachShader(prog, vs);
         GLES20.glAttachShader(prog, fs);

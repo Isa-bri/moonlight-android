@@ -260,6 +260,9 @@
     <string name="title_vr_screen_height">VR cinema: screen height</string>
     <string name="summary_vr_screen_height">Height of the virtual screen; the width follows the video aspect ratio. 1.30 m at 2.0 m is about 60 degrees wide</string>
     <string name="suffix_vr_screen_meters">m</string>
+    <string name="title_vr_lens_distortion">VR: lens distortion correction</string>
+    <string name="summary_vr_lens_distortion">Barrel pre-distortion that cancels the pincushion of the headset lenses. 0 is off; raise it until straight lines at the edges look straight</string>
+    <string name="suffix_vr_lens_k">k1</string>
     <string name="title_vr_head_mouse">VR: head as camera (gyro to mouse)</string>
     <string name="summary_vr_head_mouse">Turning your head moves the mouse, so it aims the game camera. The screen stays fixed in front of your eyes and the cinema head tracking is turned off</string>
     <string name="title_vr_head_mouse_sensitivity">VR: head mouse sensitivity</string>
