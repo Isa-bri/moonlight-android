@@ -53,7 +53,7 @@ public class ArPosition {
     private volatile boolean recenterRequested = true;
 
     // Só usados pela thread do ARCore
-    private boolean fwdHeld, backHeld, leftHeld, rightHeld;
+    private volatile boolean fwdHeld, backHeld, leftHeld, rightHeld;
     private long lastLog;
 
     public ArPosition(Context context, NvConnection conn, float thresholdM) {
@@ -86,6 +86,10 @@ public class ArPosition {
             }
             thread = null;
         }
+    }
+
+    public boolean isWalking() {
+        return fwdHeld || backHeld || leftHeld || rightHeld;
     }
 
     // A próxima leitura vira a origem

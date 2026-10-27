@@ -28,7 +28,7 @@ public class StepWalker implements SensorEventListener {
     // Só usados na thread do sensor
     private float gravity = SensorManager.GRAVITY_EARTH;
     private long lastStepNs;
-    private boolean down;
+    private volatile boolean down;
     private final Runnable release = this::releaseKey;
 
     public StepWalker(Context context, NvConnection conn, float thresholdMs2) {
@@ -56,6 +56,10 @@ public class StepWalker implements SensorEventListener {
             handler = null;
             thread = null;
         }
+    }
+
+    public boolean isWalking() {
+        return down;
     }
 
     private void releaseKey() {

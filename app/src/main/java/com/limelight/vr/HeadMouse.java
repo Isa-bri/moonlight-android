@@ -12,9 +12,21 @@ import com.limelight.nvstream.NvConnection;
 // Usa a mesma orientação do HeadTracker, mas só os deltas entre leituras; o recentramento do
 // HeadTracker (rotação em torno de Z) não altera yaw/pitch relativos. Girar para a direita move o mouse
 // para a direita; olhar para cima move o mouse para cima (y positivo é para baixo).
+//
+// Giro na borda: passando de `edgeDeg` graus para um lado do ponto central (onde a cabeça estava ao começar ou ao soltar
+// a embreagem), a câmera continua girando sozinha, mais rápido quanto mais longe, para virar além do alcance do pescoço.
+//
+// Zona morta vertical ao andar: enquanto andar (W/A/S/D segurado por outra classe) o pitch só passa depois de sair de
+// uma faixa de `walkPitchBandDeg` graus em volta da última posição, o que esconde o balanço da cabeça a cada passo.
 public class HeadMouse {
+    public interface WalkSource {
+        boolean isWalking();
+    }
+
     private static final long PERIOD_MS = 4; // ~250 Hz, acima do sensor (~200 Hz)
     private static final float DEADZONE_DEG = 0.005f;
+    private static final float EDGE_RAMP_DEG = 15f;       // da borda até a velocidade máxima
+    private static final float EDGE_MAX_DEG_PER_S = 120f; // velocidade máxima do giro na borda
 
     private final HeadTracker tracker;
     private final NvConnection conn;
@@ -31,6 +43,14 @@ public class HeadMouse {
     private boolean hasPrev;
     private float prevYaw, prevPitch;
     private float remX, remY;
+    private float centerYaw;
+    private long prevNs;
+    private float anchorPitch;
+    private boolean wasWalking;
+
+    private volatile float edgeDeg;          // 0 = desligado
+    private volatile float walkPitchBandDeg; // 0 = desligado
+    private volatile WalkSource walkSource;
 
     private final Runnable tick = new Runnable() {
         @Override
@@ -48,6 +68,15 @@ public class HeadMouse {
         this.conn = conn;
         this.countsPerDegree = countsPerDegree;
         this.pitchCountsPerDegree = countsPerDegree * pitchScale;
+    }
+
+    public void setEdgeTurn(float edgeDeg) {
+        this.edgeDeg = edgeDeg;
+    }
+
+    public void setWalkPitchBand(float bandDeg, WalkSource source) {
+        this.walkPitchBandDeg = bandDeg;
+        this.walkSource = source;
     }
 
     public boolean start() {
@@ -99,12 +128,19 @@ public class HeadMouse {
         float yaw = (float) Math.toDegrees(Math.atan2(gx, gy));
         float pitch = (float) Math.toDegrees(Math.asin(Math.max(-1f, Math.min(1f, gz))));
 
+        long nowNs = System.nanoTime();
         if (!hasPrev) {
             prevYaw = yaw;
             prevPitch = pitch;
+            centerYaw = yaw;
+            anchorPitch = pitch;
+            wasWalking = false;
+            prevNs = nowNs;
             hasPrev = true;
             return;
         }
+        float dt = Math.min((nowNs - prevNs) / 1e9f, 0.05f);
+        prevNs = nowNs;
 
         float dYaw = yaw - prevYaw;
         if (dYaw > 180f) dYaw -= 360f;
@@ -113,11 +149,40 @@ public class HeadMouse {
         prevYaw = yaw;
         prevPitch = pitch;
 
+        // Ao andar, o pitch só segue quando sai da faixa em volta da âncora
+        WalkSource source = walkSource;
+        boolean walking = walkPitchBandDeg > 0 && source != null && source.isWalking();
+        if (walking) {
+            if (!wasWalking) {
+                anchorPitch = pitch - dPitch;
+            }
+            float band = walkPitchBandDeg;
+            float before = anchorPitch;
+            if (pitch > anchorPitch + band) anchorPitch = pitch - band;
+            else if (pitch < anchorPitch - band) anchorPitch = pitch + band;
+            dPitch = anchorPitch - before;
+        }
+        wasWalking = walking;
+
+        // Giro na borda: soma uma rotação contínua de yaw quando a cabeça passa do limite
+        float edgeYaw = 0;
+        float edge = edgeDeg;
+        if (edge > 0) {
+            float rel = yaw - centerYaw;
+            if (rel > 180f) rel -= 360f;
+            else if (rel < -180f) rel += 360f;
+            float excess = Math.abs(rel) - edge;
+            if (excess > 0) {
+                float speed = Math.min(excess / EDGE_RAMP_DEG, 1f) * EDGE_MAX_DEG_PER_S;
+                edgeYaw = Math.signum(rel) * speed * dt;
+            }
+        }
+
         if (Math.abs(dYaw) < DEADZONE_DEG) dYaw = 0;
         if (Math.abs(dPitch) < DEADZONE_DEG) dPitch = 0;
 
         // Guarda a fração que não cabe num inteiro para não perder movimento lento
-        remX += dYaw * countsPerDegree;
+        remX += (dYaw + edgeYaw) * countsPerDegree;
         remY += -dPitch * pitchCountsPerDegree;
         int mx = (int) remX;
         int my = (int) remY;

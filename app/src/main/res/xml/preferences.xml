@@ -397,6 +397,35 @@
             android:summary="@string/summary_vr_head_mouse_sensitivity"
             android:text="@string/suffix_vr_counts_per_degree"
             android:title="@string/title_vr_head_mouse_sensitivity" />
+        <CheckBoxPreference
+            android:key="checkbox_vr_edge_turn"
+            android:dependency="checkbox_vr_head_mouse"
+            android:title="@string/title_vr_edge_turn"
+            android:summary="@string/summary_vr_edge_turn"
+            android:defaultValue="false"/>
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_edge_turn_angle"
+            android:dependency="checkbox_vr_edge_turn"
+            android:defaultValue="45"
+            seekbar:min="20"
+            android:max="90"
+            seekbar:step="5"
+            android:dialogMessage="@string/summary_vr_edge_turn_angle"
+            android:summary="@string/summary_vr_edge_turn_angle"
+            android:text="@string/suffix_degrees"
+            android:title="@string/title_vr_edge_turn_angle" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_walk_pitch_band"
+            android:dependency="checkbox_vr_head_mouse"
+            android:defaultValue="15"
+            seekbar:min="0"
+            android:max="60"
+            seekbar:step="1"
+            seekbar:divisor="10"
+            android:dialogMessage="@string/summary_vr_walk_pitch_band"
+            android:summary="@string/summary_vr_walk_pitch_band"
+            android:text="@string/suffix_degrees"
+            android:title="@string/title_vr_walk_pitch_band" />
         <com.limelight.preferences.SeekBarPreference
             android:key="seekbar_vr_head_mouse_pitch_percent"
             android:dependency="checkbox_vr_head_mouse"

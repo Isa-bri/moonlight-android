@@ -2557,6 +2557,17 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
                 if (prefConfig.vrCinema && prefConfig.vrHeadMouse && headMouse == null) {
                     headMouse = new HeadMouse(Game.this, conn, prefConfig.vrHeadMouseSensitivity, prefConfig.vrHeadMousePitchPercent / 100f);
+                    if (prefConfig.vrEdgeTurn) {
+                        headMouse.setEdgeTurn(prefConfig.vrEdgeTurnAngle);
+                    }
+                    headMouse.setWalkPitchBand(prefConfig.vrWalkPitchBand / 10f, new HeadMouse.WalkSource() {
+                        @Override
+                        public boolean isWalking() {
+                            StepWalker walker = stepWalker;
+                            ArPosition position = arPosition;
+                            return (walker != null && walker.isWalking()) || (position != null && position.isWalking());
+                        }
+                    });
                     if (!headMouse.start()) {
                         LimeLog.warning("Sem giroscópio: cabeça = câmera indisponível");
                         headMouse = null;
