@@ -46,6 +46,7 @@ public class ArPosition {
     private static final short KEY_D = (short) 0x8044;
 
     private static final float SIDE_FACTOR = 2f;
+    private static final long MOTION_WINDOW_NS = 500_000_000L; // modo "só enquanto se move": deslocamento nos últimos 0,5 s
 
     private final Context context;
     private final NvConnection conn;
@@ -53,6 +54,8 @@ public class ArPosition {
     private final float releaseM;
     private final float sideThresholdM;
     private final float sideReleaseM;
+    private final boolean holdMode; // true = joystick (segura enquanto longe da origem); false = só enquanto se move
+    private final ArMotionKeys motion;
 
     private Thread thread;
     private volatile boolean running;
@@ -74,9 +77,11 @@ public class ArPosition {
     private boolean hasPrevPose;
     private long lastPoseNs;
 
-    public ArPosition(Context context, NvConnection conn, float thresholdM) {
+    public ArPosition(Context context, NvConnection conn, float thresholdM, boolean holdMode) {
         this.context = context;
         this.conn = conn;
+        this.holdMode = holdMode;
+        this.motion = new ArMotionKeys(thresholdM, SIDE_FACTOR, MOTION_WINDOW_NS);
         this.thresholdM = thresholdM;
         this.releaseM = thresholdM * 0.6f; // histerese
         // Os lados pedem mais deslocamento: a cabeça balança para os lados sem querer
@@ -166,8 +171,8 @@ public class ArPosition {
             session.setCameraTextureName(tex[0]);
             session.setDisplayGeometry(Surface.ROTATION_90, 1, 1);
             session.resume();
-            VrLog.i("AR", "iniciado limiar=%.0fcm lado=%.0fcm soltura=%.0f%% resolucao=%s",
-                    thresholdM * 100, sideThresholdM * 100, releaseM / thresholdM * 100,
+            VrLog.i("AR", "iniciado modo=%s limiar=%.0fcm lado=%.0fcm soltura=%.0f%% resolucao=%s",
+                    holdMode ? "joystick(segura longe da origem)" : "so_enquanto_se_move", thresholdM * 100, sideThresholdM * 100, releaseM / thresholdM * 100,
                     smallest != null ? smallest.getImageSize().getWidth() + "x" + smallest.getImageSize().getHeight() : "?");
 
             float originX = 0, originZ = 0;
@@ -200,6 +205,7 @@ public class ArPosition {
                 }
                 if (state != TrackingState.TRACKING) {
                     hasPrevPose = false;
+                    motion.reset();
                     releaseAll("rastreamento perdido");
                     logWindow();
                     continue;
@@ -234,6 +240,7 @@ public class ArPosition {
                     originZ = z;
                     bodyX = fwdX;
                     bodyZ = fwdZ;
+                    motion.reset();
                     releaseAll("recentrou");
                 }
 
@@ -249,10 +256,20 @@ public class ArPosition {
                 winMinSide = Math.min(winMinSide, side);
                 winMaxSide = Math.max(winMaxSide, side);
 
-                boolean wantFwd = hold(fwdHeld, forward);
-                boolean wantBack = hold(backHeld, -forward);
-                boolean wantRight = holdSide(rightHeld, side);
-                boolean wantLeft = holdSide(leftHeld, -side);
+                boolean wantFwd, wantBack, wantRight, wantLeft;
+                if (holdMode) {
+                    wantFwd = hold(fwdHeld, forward);
+                    wantBack = hold(backHeld, -forward);
+                    wantRight = holdSide(rightHeld, side);
+                    wantLeft = holdSide(leftHeld, -side);
+                }
+                else {
+                    motion.update(forward, side, frameNs);
+                    wantFwd = motion.w;
+                    wantBack = motion.s;
+                    wantRight = motion.d;
+                    wantLeft = motion.a;
+                }
                 fwdHeld = key(KEY_W, fwdHeld, wantFwd);
                 backHeld = key(KEY_S, backHeld, wantBack);
                 rightHeld = key(KEY_D, rightHeld, wantRight);

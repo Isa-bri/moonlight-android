@@ -381,6 +381,12 @@
             android:text="@string/suffix_cm"
             android:title="@string/title_vr_position_distance" />
         <CheckBoxPreference
+            android:key="checkbox_vr_position_hold"
+            android:dependency="checkbox_vr_position"
+            android:title="@string/title_vr_position_hold"
+            android:summary="@string/summary_vr_position_hold"
+            android:defaultValue="false"/>
+        <CheckBoxPreference
             android:key="checkbox_vr_head_mouse"
             android:dependency="checkbox_vr_cinema"
             android:title="@string/title_vr_head_mouse"
