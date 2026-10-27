@@ -44,11 +44,13 @@ import android.annotation.TargetApi;
 import android.app.Activity;
 import android.app.PictureInPictureParams;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
@@ -61,6 +63,7 @@ import android.media.AudioManager;
 import android.net.ConnectivityManager;
 import android.net.wifi.WifiManager;
 import android.os.Build;
+import android.util.Log;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -129,6 +132,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private boolean surfaceCreated = false;
     private boolean vrConnectionStarted = false;
     private HeadMouse headMouse;
+    private StereoGLView vrView;
+    private BroadcastReceiver mouseTestReceiver;
     private boolean attemptedConnection = false;
     private int suppressPipRefCount = 0;
     private String pcName;
@@ -2270,6 +2275,45 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     public void stageComplete(String stage) {
     }
 
+    // Teste de latência do caminho do mouse (debug):
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_MOUSE_TEST --ei n 20
+    // manda n movimentos alternados (+40/-40) e registra "MOUSE enviado ... t=" no log; a StereoGLView
+    // registra "PROBE mudou ... t=" quando o host pisca a tela (mesma base nanoTime, sem sincronizar relógios).
+    private void registerMouseLatencyTest() {
+        if (vrView == null || mouseTestReceiver != null) {
+            return;
+        }
+        mouseTestReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                final int n = intent.getIntExtra("n", 20);
+                final int gapMs = intent.getIntExtra("gap_ms", 800);
+                vrView.setProbe(true);
+                new Thread(() -> {
+                    try {
+                        for (int i = 0; i < n; i++) {
+                            Thread.sleep(gapMs);
+                            short dx = (short) (i % 2 == 0 ? 40 : -40);
+                            Log.i("DeckVR", "MOUSE enviado " + i + " t=" + System.nanoTime());
+                            conn.sendMouseMove(dx, (short) 0);
+                        }
+                        Thread.sleep(gapMs);
+                    } catch (InterruptedException ignored) {
+                    }
+                    vrView.setProbe(false);
+                    Log.i("DeckVR", "MOUSE teste fim");
+                }, "DeckVR-MouseTest").start();
+            }
+        };
+        IntentFilter filter = new IntentFilter("com.limelight.debug.DECKVR_MOUSE_TEST");
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(mouseTestReceiver, filter, Context.RECEIVER_EXPORTED);
+        }
+        else {
+            registerReceiver(mouseTestReceiver, filter);
+        }
+    }
+
     private void stopConnection() {
         if (connecting || connected) {
             connecting = connected = false;
@@ -2280,6 +2324,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             if (headMouse != null) {
                 headMouse.stop();
                 headMouse = null;
+            }
+            if (mouseTestReceiver != null) {
+                unregisterReceiver(mouseTestReceiver);
+                mouseTestReceiver = null;
             }
 
             // Update GameManager state to indicate we're no longer in game
@@ -2473,6 +2521,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     }
                 }
 
+                registerMouseLatencyTest();
+
                 // Hide the mouse cursor now after a short delay.
                 // Doing it before dismissing the spinner seems to be undone
                 // when the spinner gets displayed. On Android Q, even now
@@ -2575,7 +2625,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             if (prefConfig.vrCinema) {
                 // O StreamView continua por baixo (ciclo de vida e entrada); o vídeo
                 // vai para a StereoGLView, que só inicia a conexão quando tem Surface
-                StereoGLView stereoView = new StereoGLView(this, prefConfig.width, prefConfig.height, prefConfig.enablePerfOverlay, prefConfig.vrHeadTracking && !prefConfig.vrHeadMouse,
+                StereoGLView stereoView = vrView = new StereoGLView(this, prefConfig.width, prefConfig.height, prefConfig.enablePerfOverlay, prefConfig.vrHeadTracking && !prefConfig.vrHeadMouse,
                         prefConfig.vrScreenDistanceCm / 100f, prefConfig.vrScreenHeightCm / 100f, prefConfig.vrLensDistortion / 100f, prefConfig.vrChromatic / 100f, prefConfig.vrIpdMm / 1000f,
                         surface -> runOnUiThread(() -> {
                             if (vrConnectionStarted) {

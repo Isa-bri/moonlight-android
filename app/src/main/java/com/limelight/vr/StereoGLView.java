@@ -139,6 +139,12 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
     private long statsSumNs;
     private long statsMaxNs;
 
+    // Teste de latência do mouse (debug): lê 1 pixel do centro do olho esquerdo a cada quadro novo e
+    // registra o instante em que a luminância muda (o host pisca a tela quando o mouse mexe)
+    private volatile boolean probe;
+    private final java.nio.ByteBuffer probePixel = java.nio.ByteBuffer.allocateDirect(4);
+    private int probeLuma = -1;
+
     // screenDistance e screenHeight (metros) definem a tela virtual do modo cinema; a largura vem da proporção do vídeo
     public StereoGLView(Context context, int videoWidth, int videoHeight, boolean measureLatency,
                         boolean headTracking, float screenDistance, float screenHeight, float lensK1, float chromatic, float ipd, SurfaceListener listener) {
@@ -337,6 +343,15 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         }
         GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
 
+        if (probe && newFrame) {
+            GLES20.glReadPixels(viewWidth / 2 - offset, viewHeight / 2, 1, 1, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, probePixel);
+            int luma = ((probePixel.get(0) & 0xFF) + (probePixel.get(1) & 0xFF) + (probePixel.get(2) & 0xFF)) / 3;
+            if (probeLuma >= 0 && Math.abs(luma - probeLuma) > 60) {
+                Log.i("DeckVR", "PROBE mudou " + probeLuma + "->" + luma + " t=" + System.nanoTime());
+            }
+            probeLuma = luma;
+        }
+
         // Só mede desenhos que consumiram um quadro novo (não os de rotação/redimensionamento)
         if (measureLatency && newFrame) {
             GLES20.glFinish();
@@ -428,6 +443,11 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         fboWidth = width;
         fboHeight = height;
         return true;
+    }
+
+    public void setProbe(boolean on) {
+        probeLuma = -1;
+        probe = on;
     }
 
     private void recordLatency(long ns) {
