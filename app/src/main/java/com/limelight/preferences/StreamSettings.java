@@ -259,6 +259,28 @@ public class StreamSettings extends Activity {
             pref.setEntryValues(entryValues);
         }
 
+        // Ao ligar a opção de `key`, desliga as opções de `others`
+        private void linkExclusive(String key, final String... others) {
+            Preference pref = findPreference(key);
+            if (pref == null) {
+                return;
+            }
+            pref.setOnPreferenceChangeListener(new Preference.OnPreferenceChangeListener() {
+                @Override
+                public boolean onPreferenceChange(Preference preference, Object newValue) {
+                    if (Boolean.TRUE.equals(newValue)) {
+                        for (String other : others) {
+                            Preference o = findPreference(other);
+                            if (o instanceof CheckBoxPreference) {
+                                ((CheckBoxPreference) o).setChecked(false);
+                            }
+                        }
+                    }
+                    return true;
+                }
+            });
+        }
+
         private void resetBitrateToDefault(SharedPreferences prefs, String res, String fps) {
             if (res == null) {
                 res = prefs.getString(PreferenceConfiguration.RESOLUTION_PREF_STRING, PreferenceConfiguration.DEFAULT_RESOLUTION);
@@ -733,6 +755,11 @@ public class StreamSettings extends Activity {
 
             // Add a listener to the FPS and resolution preference
             // so the bitrate can be auto-adjusted
+            // Posição por ARCore e andar no lugar / inclinar a cabeça mandam as mesmas teclas: ligar um desliga os outros
+            linkExclusive("checkbox_vr_position", "checkbox_vr_walk", "checkbox_vr_strafe");
+            linkExclusive("checkbox_vr_walk", "checkbox_vr_position");
+            linkExclusive("checkbox_vr_strafe", "checkbox_vr_position");
+
             findPreference(PreferenceConfiguration.RESOLUTION_PREF_STRING).setOnPreferenceChangeListener(new Preference.OnPreferenceChangeListener() {
                 @Override
                 public boolean onPreferenceChange(Preference preference, Object newValue) {

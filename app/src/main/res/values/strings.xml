@@ -276,7 +276,7 @@
     <string name="suffix_degrees">°</string>
     <string name="suffix_cm">cm</string>
     <string name="title_vr_position">VR: move your body to walk (ARCore)</string>
-    <string name="summary_vr_position">Uses the rear camera to track how far your head moves from the starting point: forward holds W, backward S, sideways A or D. Releasing Volume Down recenters. Do not combine with walk in place or head tilt strafe</string>
+    <string name="summary_vr_position">Uses the rear camera to track how far your head moves from the starting point: forward holds W, backward S, sideways A or D. Releasing Volume Down recenters. Turning this on turns off walk in place and head tilt strafe</string>
     <string name="title_vr_position_distance">VR: movement distance</string>
     <string name="summary_vr_position_distance">How far your head must move from the center before a key is held</string>
     <string name="title_vr_strafe">VR: tilt head to strafe</string>
