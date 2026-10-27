@@ -134,7 +134,8 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
     @Override
     public void onDrawFrame(GL10 unused) {
-        if (frameAvailable) {
+        boolean newFrame = frameAvailable;
+        if (newFrame) {
             frameAvailable = false;
             surfaceTexture.updateTexImage();
             surfaceTexture.getTransformMatrix(texMatrix);
@@ -168,7 +169,8 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
         GLES20.glDisableVertexAttribArray(posLoc);
 
-        if (measureLatency) {
+        // Só mede desenhos que consumiram um quadro novo (não os de rotação/redimensionamento)
+        if (measureLatency && newFrame) {
             GLES20.glFinish();
             recordLatency(System.nanoTime() - frameAvailableNs);
         }
