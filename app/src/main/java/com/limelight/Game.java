@@ -2519,7 +2519,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             if (prefConfig.vrCinema) {
                 // O StreamView continua por baixo (ciclo de vida e entrada); o vídeo
                 // vai para a StereoGLView, que só inicia a conexão quando tem Surface
-                StereoGLView stereoView = new StereoGLView(this, prefConfig.width, prefConfig.height, prefConfig.enablePerfOverlay,
+                StereoGLView stereoView = new StereoGLView(this, prefConfig.width, prefConfig.height, prefConfig.enablePerfOverlay, prefConfig.vrHeadTracking,
                         surface -> runOnUiThread(() -> {
                             if (vrConnectionStarted) {
                                 LimeLog.warning("Contexto GL recriado; a Surface do VR não foi religada ao decodificador");

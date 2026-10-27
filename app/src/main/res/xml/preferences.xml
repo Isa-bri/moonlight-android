@@ -264,6 +264,12 @@
             android:summary="@string/summary_vr_cinema"
             android:defaultValue="false"/>
         <CheckBoxPreference
+            android:key="checkbox_vr_head_tracking"
+            android:dependency="checkbox_vr_cinema"
+            android:title="@string/title_vr_head_tracking"
+            android:summary="@string/summary_vr_head_tracking"
+            android:defaultValue="true"/>
+        <CheckBoxPreference
             android:key="checkbox_enable_perf_overlay"
             android:title="@string/title_enable_perf_overlay"
             android:summary="@string/summary_enable_perf_overlay"
