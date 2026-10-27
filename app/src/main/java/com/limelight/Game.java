@@ -32,6 +32,7 @@ import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
 import com.limelight.vr.HeadMouse;
+import com.limelight.vr.StepWalker;
 import com.limelight.vr.StereoGLView;
 import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
@@ -132,6 +133,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private boolean surfaceCreated = false;
     private boolean vrConnectionStarted = false;
     private HeadMouse headMouse;
+    private StepWalker stepWalker;
     private StereoGLView vrView;
     private BroadcastReceiver mouseTestReceiver;
     private boolean attemptedConnection = false;
@@ -2325,6 +2327,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 headMouse.stop();
                 headMouse = null;
             }
+            if (stepWalker != null) {
+                stepWalker.stop();
+                stepWalker = null;
+            }
             if (mouseTestReceiver != null) {
                 unregisterReceiver(mouseTestReceiver);
                 mouseTestReceiver = null;
@@ -2522,6 +2528,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 }
 
                 registerMouseLatencyTest();
+
+                if (prefConfig.vrCinema && prefConfig.vrWalk && stepWalker == null) {
+                    stepWalker = new StepWalker(Game.this, conn, prefConfig.vrWalkThreshold / 10f);
+                    if (!stepWalker.start()) {
+                        LimeLog.warning("Sem acelerômetro: andar no lugar indisponível");
+                        stepWalker = null;
+                    }
+                }
 
                 // Hide the mouse cursor now after a short delay.
                 // Doing it before dismissing the spinner seems to be undone

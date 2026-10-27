@@ -54,6 +54,8 @@ public class PreferenceConfiguration {
     private static final String VR_HEAD_MOUSE_SENSITIVITY_PREF_STRING = "seekbar_vr_head_mouse_sensitivity";
     private static final String VR_HEAD_MOUSE_PITCH_PREF_STRING = "seekbar_vr_head_mouse_pitch_percent";
     private static final String VR_LENS_DISTORTION_PREF_STRING = "seekbar_vr_lens_distortion";
+    private static final String VR_WALK_PREF_STRING = "checkbox_vr_walk";
+    private static final String VR_WALK_THRESHOLD_PREF_STRING = "seekbar_vr_walk_threshold";
     private static final String VR_CHROMATIC_PREF_STRING = "seekbar_vr_chromatic";
     private static final String VR_IPD_PREF_STRING = "seekbar_vr_ipd_mm";
     private static final String VR_SCREEN_DISTANCE_PREF_STRING = "seekbar_vr_screen_distance_cm";
@@ -104,6 +106,8 @@ public class PreferenceConfiguration {
     private static final int DEFAULT_VR_HEAD_MOUSE_SENSITIVITY = 10;
     private static final int DEFAULT_VR_HEAD_MOUSE_PITCH_PERCENT = 100;
     private static final int DEFAULT_VR_LENS_DISTORTION = 0;
+    private static final boolean DEFAULT_VR_WALK = false;
+    private static final int DEFAULT_VR_WALK_THRESHOLD = 20;
     private static final int DEFAULT_VR_CHROMATIC = 0;
     private static final int DEFAULT_VR_IPD_MM = 63;
     private static final int DEFAULT_VR_SCREEN_DISTANCE_CM = 200;
@@ -161,6 +165,8 @@ public class PreferenceConfiguration {
     public int vrScreenDistanceCm;
     public int vrScreenHeightCm;
     public boolean vrHeadMouse;
+    public boolean vrWalk;
+    public int vrWalkThreshold; // décimos de m/s² acima da gravidade para contar um passo
     public int vrChromatic; // separação vermelho/azul em centésimos de k1; 0 = sem correção
     public int vrIpdMm;
     public int vrLensDistortion; // k1 em centésimos; 0 = sem correção
@@ -620,6 +626,8 @@ public class PreferenceConfiguration {
         config.vrScreenHeightCm = prefs.getInt(VR_SCREEN_HEIGHT_PREF_STRING, DEFAULT_VR_SCREEN_HEIGHT_CM);
         config.vrHeadMousePitchPercent = prefs.getInt(VR_HEAD_MOUSE_PITCH_PREF_STRING, DEFAULT_VR_HEAD_MOUSE_PITCH_PERCENT);
         config.vrLensDistortion = prefs.getInt(VR_LENS_DISTORTION_PREF_STRING, DEFAULT_VR_LENS_DISTORTION);
+        config.vrWalk = prefs.getBoolean(VR_WALK_PREF_STRING, DEFAULT_VR_WALK);
+        config.vrWalkThreshold = prefs.getInt(VR_WALK_THRESHOLD_PREF_STRING, DEFAULT_VR_WALK_THRESHOLD);
         config.vrChromatic = prefs.getInt(VR_CHROMATIC_PREF_STRING, DEFAULT_VR_CHROMATIC);
         config.vrIpdMm = prefs.getInt(VR_IPD_PREF_STRING, DEFAULT_VR_IPD_MM);
         config.vrHeadMouse = prefs.getBoolean(VR_HEAD_MOUSE_PREF_STRING, DEFAULT_VR_HEAD_MOUSE);

@@ -329,6 +329,24 @@
             android:text="@string/suffix_mm"
             android:title="@string/title_vr_ipd" />
         <CheckBoxPreference
+            android:key="checkbox_vr_walk"
+            android:dependency="checkbox_vr_cinema"
+            android:title="@string/title_vr_walk"
+            android:summary="@string/summary_vr_walk"
+            android:defaultValue="false"/>
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_walk_threshold"
+            android:dependency="checkbox_vr_walk"
+            android:defaultValue="20"
+            seekbar:min="5"
+            android:max="60"
+            seekbar:step="1"
+            seekbar:divisor="10"
+            android:dialogMessage="@string/summary_vr_walk_threshold"
+            android:summary="@string/summary_vr_walk_threshold"
+            android:text="@string/suffix_vr_walk_threshold"
+            android:title="@string/title_vr_walk_threshold" />
+        <CheckBoxPreference
             android:key="checkbox_vr_head_mouse"
             android:dependency="checkbox_vr_cinema"
             android:title="@string/title_vr_head_mouse"
