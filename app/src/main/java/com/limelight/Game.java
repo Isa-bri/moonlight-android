@@ -31,6 +31,7 @@ import com.limelight.preferences.GlPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.ui.GameGestures;
 import com.limelight.ui.StreamView;
+import com.limelight.vr.HeadMouse;
 import com.limelight.vr.StereoGLView;
 import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
@@ -125,6 +126,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private boolean autoEnterPip = false;
     private boolean surfaceCreated = false;
     private boolean vrConnectionStarted = false;
+    private HeadMouse headMouse;
     private boolean attemptedConnection = false;
     private int suppressPipRefCount = 0;
     private String pcName;
@@ -2234,6 +2236,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
             controllerHandler.stop();
 
+            if (headMouse != null) {
+                headMouse.stop();
+                headMouse = null;
+            }
+
             // Update GameManager state to indicate we're no longer in game
             UiHelper.notifyStreamEnded(this);
 
@@ -2417,6 +2424,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 connecting = false;
                 updatePipAutoEnter();
 
+                if (prefConfig.vrCinema && prefConfig.vrHeadMouse && headMouse == null) {
+                    headMouse = new HeadMouse(Game.this, conn, prefConfig.vrHeadMouseSensitivity);
+                    if (!headMouse.start()) {
+                        LimeLog.warning("Sem giroscópio: cabeça = câmera indisponível");
+                        headMouse = null;
+                    }
+                }
+
                 // Hide the mouse cursor now after a short delay.
                 // Doing it before dismissing the spinner seems to be undone
                 // when the spinner gets displayed. On Android Q, even now
@@ -2519,7 +2534,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             if (prefConfig.vrCinema) {
                 // O StreamView continua por baixo (ciclo de vida e entrada); o vídeo
                 // vai para a StereoGLView, que só inicia a conexão quando tem Surface
-                StereoGLView stereoView = new StereoGLView(this, prefConfig.width, prefConfig.height, prefConfig.enablePerfOverlay, prefConfig.vrHeadTracking,
+                StereoGLView stereoView = new StereoGLView(this, prefConfig.width, prefConfig.height, prefConfig.enablePerfOverlay, prefConfig.vrHeadTracking && !prefConfig.vrHeadMouse,
                         prefConfig.vrScreenDistanceCm / 100f, prefConfig.vrScreenHeightCm / 100f,
                         surface -> runOnUiThread(() -> {
                             if (vrConnectionStarted) {
