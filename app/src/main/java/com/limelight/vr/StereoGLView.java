@@ -68,15 +68,20 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
             "precision mediump float;\n" +
             "uniform sampler2D uScene;\n" +
             "uniform float uK1;\n" +
+            "uniform float uCa;\n" +
             "varying vec2 vPos;\n" +
+            "// Uma cor por vez: a lente refrata cada comprimento de onda um pouco diferente\n" +
+            "vec3 sampleAt(float k, float r2, float channel) {\n" +
+            "  vec2 s = vPos * (1.0 + k * r2) * 0.5 + 0.5;\n" +
+            "  if (s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0) {\n" +
+            "    return vec3(0.0);\n" +
+            "  }\n" +
+            "  return texture2D(uScene, s).rgb * vec3(channel == 0.0 ? 1.0 : 0.0, channel == 1.0 ? 1.0 : 0.0, channel == 2.0 ? 1.0 : 0.0);\n" +
+            "}\n" +
             "void main() {\n" +
             "  float r2 = dot(vPos, vPos);\n" +
-            "  vec2 s = vPos * (1.0 + uK1 * r2) * 0.5 + 0.5;\n" +
-            "  if (s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0) {\n" +
-            "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n" +
-            "  } else {\n" +
-            "    gl_FragColor = texture2D(uScene, s);\n" +
-            "  }\n" +
+            "  vec3 c = sampleAt(uK1 * (1.0 - uCa), r2, 0.0) + sampleAt(uK1, r2, 1.0) + sampleAt(uK1 * (1.0 + uCa), r2, 2.0);\n" +
+            "  gl_FragColor = vec4(c, 1.0);\n" +
             "}\n";
 
     private static final float[] QUAD = {-1, -1, 1, -1, -1, 1, 1, 1};
@@ -85,13 +90,15 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
     // 80 graus: com lentes de 40 mm e ~45 mm de distância focal (suposição para o Shinecon G13), a
     // metade da tela do S23 Ultra (~78 x 73 mm) cobre cerca de 80 x 79 graus
     private static final float FOV_Y_DEGREES = 80.0f;
-    private static final float IPD = 0.063f;
 
     private final int videoWidth;
     private final int videoHeight;
     private final boolean measureLatency;
     private final boolean headTracking;
     private final float lensK1;
+    private final float chromatic;
+    private final float ipd; // metros
+    private final float pixelsPerMeter;
     private final HeadTracker headTracker;
     private final SurfaceListener listener;
     private final FloatBuffer quad;
@@ -115,6 +122,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
     private int distPosLoc;
     private int distSceneLoc;
     private int distK1Loc;
+    private int distCaLoc;
     private int fbo;
     private int fboTex;
     private int fboWidth;
@@ -133,13 +141,16 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
     // screenDistance e screenHeight (metros) definem a tela virtual do modo cinema; a largura vem da proporção do vídeo
     public StereoGLView(Context context, int videoWidth, int videoHeight, boolean measureLatency,
-                        boolean headTracking, float screenDistance, float screenHeight, float lensK1, SurfaceListener listener) {
+                        boolean headTracking, float screenDistance, float screenHeight, float lensK1, float chromatic, float ipd, SurfaceListener listener) {
         super(context);
         this.videoWidth = videoWidth;
         this.videoHeight = videoHeight;
         this.measureLatency = measureLatency;
         this.listener = listener;
         this.lensK1 = lensK1;
+        this.chromatic = chromatic;
+        this.ipd = ipd;
+        this.pixelsPerMeter = context.getResources().getDisplayMetrics().xdpi / 0.0254f;
 
         Matrix.setIdentityM(identity, 0);
 
@@ -242,6 +253,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         distPosLoc = GLES20.glGetAttribLocation(distProgram, "aPos");
         distSceneLoc = GLES20.glGetUniformLocation(distProgram, "uScene");
         distK1Loc = GLES20.glGetUniformLocation(distProgram, "uK1");
+        distCaLoc = GLES20.glGetUniformLocation(distProgram, "uCa");
         fbo = 0;
         fboTex = 0;
         fboWidth = fboHeight = 0;
@@ -293,7 +305,10 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         GLES20.glClearColor(0, 0, 0, 1);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
-        int eyeWidth = viewWidth / 2;
+        // O centro de cada olho fica a ±IPD/2 do centro da tela (as lentes do óculos são ajustadas
+        // para a IPD); a largura da imagem é limitada para não cruzar a metade da tela
+        int offset = Math.round(ipd * pixelsPerMeter / 2);
+        int eyeWidth = Math.max(1, Math.min(viewWidth / 2, 2 * Math.min(viewWidth / 2 - offset, offset)));
         boolean tracked = headTracking && headTracker.getWorldToEye(worldToEye);
         if (tracked) {
             Matrix.perspectiveM(projection, 0, FOV_Y_DEGREES, (float) eyeWidth / viewHeight, 0.1f, 20f);
@@ -301,18 +316,26 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         boolean distort = lensK1 > 0 && ensureFbo(eyeWidth, viewHeight);
 
         for (int eye = 0; eye < 2; eye++) {
+            int centerX = viewWidth / 2 + (eye == 0 ? -offset : offset);
+            int x = centerX - eyeWidth / 2;
             if (distort) {
-                // Cena do olho na textura; depois ela é deformada para a metade da tela
+                // Cena do olho na textura; depois ela é deformada para a região do olho
+                GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
                 GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
                 drawEye(eye, 0, eyeWidth, tracked);
                 GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-                drawDistorted(eye * eyeWidth, eyeWidth);
+                GLES20.glEnable(GLES20.GL_SCISSOR_TEST);
+                GLES20.glScissor(eye * (viewWidth / 2), 0, viewWidth / 2, viewHeight);
+                drawDistorted(x, eyeWidth);
             }
             else {
-                drawEye(eye, eye * eyeWidth, eyeWidth, tracked);
+                GLES20.glEnable(GLES20.GL_SCISSOR_TEST);
+                GLES20.glScissor(eye * (viewWidth / 2), 0, viewWidth / 2, viewHeight);
+                drawEye(eye, x, eyeWidth, tracked);
             }
         }
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
 
         // Só mede desenhos que consumiram um quadro novo (não os de rotação/redimensionamento)
         if (measureLatency && newFrame) {
@@ -332,7 +355,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
         if (tracked) {
             // Tela virtual no mundo; cada olho enxerga a partir do seu lado (±IPD/2)
-            float shift = (eye == 0 ? 1 : -1) * IPD / 2;
+            float shift = (eye == 0 ? 1 : -1) * ipd / 2;
             Matrix.setIdentityM(eyeShift, 0);
             Matrix.translateM(eyeShift, 0, shift, 0, 0);
             Matrix.multiplyMM(eyeView, 0, eyeShift, 0, worldToEye, 0);
@@ -364,6 +387,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, fboTex);
         GLES20.glUniform1i(distSceneLoc, 0);
         GLES20.glUniform1f(distK1Loc, lensK1);
+        GLES20.glUniform1f(distCaLoc, chromatic);
         GLES20.glEnableVertexAttribArray(distPosLoc);
         GLES20.glVertexAttribPointer(distPosLoc, 2, GLES20.GL_FLOAT, false, 0, quad);
         GLES20.glViewport(x, 0, width, viewHeight);

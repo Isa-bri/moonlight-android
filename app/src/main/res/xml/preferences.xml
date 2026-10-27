@@ -305,6 +305,29 @@
             android:summary="@string/summary_vr_lens_distortion"
             android:text="@string/suffix_vr_lens_k"
             android:title="@string/title_vr_lens_distortion" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_chromatic"
+            android:dependency="seekbar_vr_lens_distortion"
+            android:defaultValue="0"
+            seekbar:min="0"
+            android:max="20"
+            seekbar:step="1"
+            seekbar:divisor="100"
+            android:dialogMessage="@string/summary_vr_chromatic"
+            android:summary="@string/summary_vr_chromatic"
+            android:text="@string/suffix_vr_lens_k"
+            android:title="@string/title_vr_chromatic" />
+        <com.limelight.preferences.SeekBarPreference
+            android:key="seekbar_vr_ipd_mm"
+            android:dependency="checkbox_vr_cinema"
+            android:defaultValue="63"
+            seekbar:min="50"
+            android:max="80"
+            seekbar:step="1"
+            android:dialogMessage="@string/summary_vr_ipd"
+            android:summary="@string/summary_vr_ipd"
+            android:text="@string/suffix_mm"
+            android:title="@string/title_vr_ipd" />
         <CheckBoxPreference
             android:key="checkbox_vr_head_mouse"
             android:dependency="checkbox_vr_cinema"
