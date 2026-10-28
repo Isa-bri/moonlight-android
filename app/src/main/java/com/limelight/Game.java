@@ -1369,7 +1369,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
         arPosition = new ArPosition(Game.this, conn, prefConfig.vrPositionDistance / 100f, prefConfig.vrPositionHold, moveStickOrNull());
         if (!arPosition.start()) {
-            LimeLog.warning("ARCore indisponível: andar movendo o corpo desligado");
+            LimeLog.warning("ARCore unavailable: walking by moving the body is off");
             arPosition = null;
         }
     }
@@ -1386,7 +1386,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (headMouse != null) {
-            // Com o celular no óculos não dá para tocar na tela: os botões de volume controlam a cabeça
+            // With the phone in the headset the screen cannot be touched: the volume buttons control the head
             if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
                 if (event.getRepeatCount() == 0) {
                     headMouse.setClutch(true);
@@ -1490,9 +1490,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 if (arPosition != null) {
                     arPosition.recenter();
                 }
-                VrTrace.volume("recentrar");
-                VrLog.i("VOL", "volume baixo solto: centro redefinido (giro na borda%s)",
-                        arPosition != null ? " e origem do ARCore" : "");
+                VrTrace.volume("recenter");
+                VrLog.i("VOL", "volume down released: center reset (edge turn%s)",
+                        arPosition != null ? " and ARCore origin" : "");
                 vibrateShort();
                 return true;
             }
@@ -2322,8 +2322,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     public void stageComplete(String stage) {
     }
 
-    // Destino do movimento do corpo quando a opção de analógico está ligada: o analógico esquerdo do controle 0 (ver
-    // ControllerHandler.setMotionStick). null = W/A/S/D. O envio é feito na thread principal, onde o ControllerHandler roda.
+    // Destination of the body movement when the analog option is on: the left analog stick of controller 0 (see
+    // ControllerHandler.setMotionStick). null = W/A/S/D. Sending is done on the main thread, where the ControllerHandler runs.
     private MoveStick moveStickOrNull() {
         if (!prefConfig.vrCinema || !prefConfig.vrMoveAnalog) {
             return null;
@@ -2336,7 +2336,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         return moveStick;
     }
 
-    // Teste sem andar: com o ARCore rodando, soma um deslocamento falso que cresce na velocidade pedida.
+    // Test without walking: with ARCore running, adds a fake displacement that grows at the requested speed.
     // adb shell am broadcast -a com.limelight.debug.DECKVR_AR_TEST --ef vf 0.8 --ef vs 0
     private void registerArTest() {
         if (arTestReceiver != null) {
@@ -2360,10 +2360,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
     }
 
-    // Parâmetros em vigor, no formato que o ReplayRunner lê (cabeçalho `cfg` de um rastro)
+    // Parameters in effect, in the format the ReplayRunner reads (`cfg` header of a trace)
     private String traceConfig() {
         return String.format(Locale.US,
-                "sens=%d;vert=%d;borda=%b;borda_graus=%d;passos_borda=%b;banda=%.1f;ar=%b;ar_cm=%d;ar_hold=%b;analogico=%b;passos=%b;passos_limiar=%.1f",
+                "sens=%d;vert=%d;edge=%b;edge_deg=%d;edge_steps=%b;band=%.1f;ar=%b;ar_cm=%d;ar_hold=%b;analog=%b;steps=%b;steps_threshold=%.1f",
                 prefConfig.vrHeadMouseSensitivity, prefConfig.vrHeadMousePitchPercent, prefConfig.vrEdgeTurn,
                 prefConfig.vrEdgeTurnAngle, prefConfig.vrSnapTurn, prefConfig.vrWalkPitchBand / 10f, prefConfig.vrPosition,
                 prefConfig.vrPositionDistance, prefConfig.vrPositionHold, prefConfig.vrMoveAnalog, prefConfig.vrWalk,
@@ -2382,12 +2382,12 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         return lines;
     }
 
-    // Gravação de rastros e replay (fork DeckVR). Os arquivos ficam em files/ do app (lidos com `run-as ... cat`):
-    //   adb shell am broadcast -a com.limelight.debug.DECKVR_TRACE --es acao start --es nome casa1
-    //   adb shell am broadcast -a com.limelight.debug.DECKVR_TRACE --es acao mark --es rotulo parada
-    //   adb shell am broadcast -a com.limelight.debug.DECKVR_TRACE --es acao stop
-    //   adb shell am broadcast -a com.limelight.debug.DECKVR_REPLAY            (confere todos os files/replay/*.csv com *.regras)
-    //   adb shell am broadcast -a com.limelight.debug.DECKVR_REPLAY --es caso casa1 --ez live true   (toca ao vivo no stream)
+    // Trace recording and replay (DeckVR fork). The files live in the app's files/ (read with `run-as ... cat`):
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_TRACE --es action start --es name home1
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_TRACE --es action mark --es label still
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_TRACE --es action stop
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_REPLAY            (checks every files/replay/*.csv against *.rules)
+    //   adb shell am broadcast -a com.limelight.debug.DECKVR_REPLAY --es case home1 --ez live true   (plays live on the stream)
     private void registerTraceAndReplay() {
         if (traceReceiver != null) {
             return;
@@ -2395,20 +2395,20 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         traceReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                String acao = intent.getStringExtra("acao");
-                if ("start".equals(acao)) {
-                    String nome = intent.getStringExtra("nome");
-                    java.io.File f = new java.io.File(getFilesDir(), "traces/" + (nome != null ? nome : "rastro") + ".csv");
+                String action = intent.getStringExtra("action");
+                if ("start".equals(action)) {
+                    String name = intent.getStringExtra("name");
+                    java.io.File f = new java.io.File(getFilesDir(), "traces/" + (name != null ? name : "trace") + ".csv");
                     boolean ok = VrTrace.start(f, traceConfig());
-                    Log.i(VrLog.TAG, "TRACE iniciado ok=" + ok + " arquivo=" + f.getName());
+                    Log.i(VrLog.TAG, "TRACE started ok=" + ok + " file=" + f.getName());
                 }
-                else if ("stop".equals(acao)) {
+                else if ("stop".equals(action)) {
                     int dropped = VrTrace.dropped();
                     VrTrace.stop();
-                    Log.i(VrLog.TAG, "TRACE parou descartadas=" + dropped);
+                    Log.i(VrLog.TAG, "TRACE stopped dropped=" + dropped);
                 }
-                else if ("mark".equals(acao)) {
-                    VrTrace.mark(String.valueOf(intent.getStringExtra("rotulo")));
+                else if ("mark".equals(action)) {
+                    VrTrace.mark(String.valueOf(intent.getStringExtra("label")));
                 }
             }
         };
@@ -2417,7 +2417,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             public void onReceive(Context context, Intent intent) {
                 HeadMouse hm = headMouse;
                 if (hm != null) {
-                    hm.setPaused(intent.getBooleanExtra("ligar", true));
+                    hm.setPaused(intent.getBooleanExtra("on", true));
                 }
             }
         };
@@ -2431,28 +2431,28 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(traceReceiver, new IntentFilter("com.limelight.debug.DECKVR_TRACE"), flags);
             registerReceiver(replayReceiver, new IntentFilter("com.limelight.debug.DECKVR_REPLAY"), flags);
-            registerReceiver(pauseReceiver, new IntentFilter("com.limelight.debug.DECKVR_PAUSA"), flags);
+            registerReceiver(pauseReceiver, new IntentFilter("com.limelight.debug.DECKVR_PAUSE"), flags);
         }
         else {
             registerReceiver(traceReceiver, new IntentFilter("com.limelight.debug.DECKVR_TRACE"));
             registerReceiver(replayReceiver, new IntentFilter("com.limelight.debug.DECKVR_REPLAY"));
-            registerReceiver(pauseReceiver, new IntentFilter("com.limelight.debug.DECKVR_PAUSA"));
+            registerReceiver(pauseReceiver, new IntentFilter("com.limelight.debug.DECKVR_PAUSE"));
         }
     }
 
     private void runReplay(Intent intent) {
         String dirName = intent.getStringExtra("dir");
         java.io.File dir = dirName != null ? new java.io.File(dirName) : new java.io.File(getFilesDir(), "replay");
-        if (intent.getBooleanExtra("parar", false)) {
-            liveReplayStop = true; // aborta o replay ao vivo em andamento; o `finally` dele solta tudo
-            Log.i(VrLog.TAG, "REPLAY ao vivo: parada pedida");
+        if (intent.getBooleanExtra("stop", false)) {
+            liveReplayStop = true; // aborts the live replay in progress; its `finally` releases everything
+            Log.i(VrLog.TAG, "REPLAY live: stop requested");
             return;
         }
-        String caso = intent.getStringExtra("caso");
+        String caseName = intent.getStringExtra("case");
         boolean live = intent.getBooleanExtra("live", false);
-        java.io.File[] files = dir.listFiles((d, name) -> name.endsWith(".csv") && (caso == null || name.equals(caso + ".csv")));
+        java.io.File[] files = dir.listFiles((d, name) -> name.endsWith(".csv") && (caseName == null || name.equals(caseName + ".csv")));
         if (files == null || files.length == 0) {
-            Log.w(VrLog.TAG, "REPLAY nenhum rastro em " + dir + (caso != null ? " para o caso " + caso : ""));
+            Log.w(VrLog.TAG, "REPLAY no traces in " + dir + (caseName != null ? " for case " + caseName : ""));
             return;
         }
         java.util.Arrays.sort(files);
@@ -2460,45 +2460,45 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             runLiveReplay(files[0]);
             return;
         }
-        int passou = 0, falhou = 0;
+        int passed = 0, failed = 0;
         for (java.io.File csv : files) {
             String base = csv.getName().substring(0, csv.getName().length() - 4);
             try {
-                java.io.File regras = new java.io.File(dir, base + ".regras");
-                if (!regras.exists()) {
-                    Log.w(VrLog.TAG, "REPLAY caso=" + base + " FALHOU sem arquivo de regras (" + regras.getName() + "): nada conferido");
-                    falhou++;
+                java.io.File rules = new java.io.File(dir, base + ".rules");
+                if (!rules.exists()) {
+                    Log.w(VrLog.TAG, "REPLAY case=" + base + " FAILED no rules file (" + rules.getName() + "): nothing checked");
+                    failed++;
                     continue;
                 }
-                ReplayRunner.Result r = ReplayRunner.run(base, readLines(csv), readLines(regras));
+                ReplayRunner.Result r = ReplayRunner.run(base, readLines(csv), readLines(rules));
                 for (String l : r.lines) {
-                    Log.i(VrLog.TAG, "REPLAY caso=" + base + " " + l);
+                    Log.i(VrLog.TAG, "REPLAY case=" + base + " " + l);
                 }
-                Log.i(VrLog.TAG, "REPLAY caso=" + base + " " + (r.passed() ? "PASSOU" : "FALHOU") + " conferidas=" + r.checked + " falhas=" + r.failed);
-                if (r.passed()) passou++; else falhou++;
+                Log.i(VrLog.TAG, "REPLAY case=" + base + " " + (r.passed() ? "PASSED" : "FAILED") + " checked=" + r.checked + " failures=" + r.failed);
+                if (r.passed()) passed++; else failed++;
             } catch (Throwable t) {
-                Log.e(VrLog.TAG, "REPLAY caso=" + base + " FALHOU erro: " + t);
-                falhou++;
+                Log.e(VrLog.TAG, "REPLAY case=" + base + " FAILED error: " + t);
+                failed++;
             }
         }
-        Log.i(VrLog.TAG, "REPLAY resumo passou=" + passou + " falhou=" + falhou);
+        Log.i(VrLog.TAG, "REPLAY summary passed=" + passed + " failed=" + failed);
     }
 
-    // Toca o rastro no stream aberto, no ritmo gravado, mandando as saídas para o caminho real (teclas, mouse, analógico).
-    // Recusa se o movimento real do corpo estiver ligado (ARCore/andar no lugar): os dois se misturariam.
+    // Plays the trace on the open stream, at the recorded pace, sending the outputs down the real path (keys, mouse, analog).
+    // Refuses if real body movement is on (ARCore/walking in place): the two would mix.
     private void runLiveReplay(java.io.File csv) {
         if (liveReplayRunning) {
-            Log.w(VrLog.TAG, "REPLAY ao vivo ja esta rodando");
+            Log.w(VrLog.TAG, "REPLAY live already running");
             return;
         }
         if (arPosition != null || stepWalker != null || !connected) {
-            Log.w(VrLog.TAG, "REPLAY ao vivo recusado: precisa de stream aberto e sem ARCore/andar no lugar ligados");
+            Log.w(VrLog.TAG, "REPLAY live refused: needs an open stream with ARCore/walk-in-place off");
             return;
         }
         final MoveStick stickOut = moveStickOrNull();
         liveReplayRunning = true;
         liveReplayStop = false;
-        Log.i(VrLog.TAG, "REPLAY ao vivo iniciando caso=" + csv.getName());
+        Log.i(VrLog.TAG, "REPLAY live starting case=" + csv.getName());
         try {
             final long wallStart = System.nanoTime();
             ReplayRunner.Sink sink = new ReplayRunner.Sink() {
@@ -2523,7 +2523,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             ReplayRunner.Pacer pacer = new ReplayRunner.Pacer() {
                 @Override
                 public boolean waitUntil(long relativeMs) {
-                    // Dorme em fatias curtas para poder abortar logo quando `parar` chegar
+                    // Sleeps in short slices so it can abort quickly when `stop` arrives
                     while (!liveReplayStop) {
                         long waitMs = relativeMs - (System.nanoTime() - wallStart) / 1_000_000L;
                         if (waitMs <= 0) {
@@ -2539,9 +2539,9 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             };
             ReplayRunner.playLive(readLines(csv), sink, pacer);
         } catch (Throwable t) {
-            Log.e(VrLog.TAG, "REPLAY ao vivo erro: " + t);
+            Log.e(VrLog.TAG, "REPLAY live error: " + t);
         } finally {
-            // Termina sempre solto: nenhuma tecla/analógico preso no Deck por causa de um replay interrompido
+            // Always ends released: no key/analog stuck on the Deck because of an interrupted replay
             for (char k : new char[]{'W', 'A', 'S', 'D'}) {
                 short code = k == 'W' ? (short) 0x8057 : k == 'S' ? (short) 0x8053 : k == 'A' ? (short) 0x8041 : (short) 0x8044;
                 conn.sendKeyboardInput(code, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
@@ -2550,17 +2550,17 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 stickOut.setStick(0f, 0f);
             }
             liveReplayRunning = false;
-            Log.i(VrLog.TAG, "REPLAY ao vivo terminou caso=" + csv.getName());
+            Log.i(VrLog.TAG, "REPLAY live finished case=" + csv.getName());
         }
     }
 
-    // Uma linha com todas as opções VR em vigor: cada captura de log fica auto-explicativa
+    // One line with all the VR options in effect: every log capture becomes self-explanatory
     private void logVrConfig() {
         if (!prefConfig.vrCinema) {
             return;
         }
-        VrLog.i("CONFIG", "mouse=%b sens=%d vert=%d%% borda=%b borda_graus=%d passos_borda=%b mouse_sync=%b banda=%.1f passos=%b passos_limiar=%.1f lado=%b lado_graus=%d "
-                        + "ar=%b ar_joystick=%b analogico=%b ar_cm=%d ipd=%dmm k1=%.2f ca=%.2f tela=%dcm/%dcm cabeca_visual=%b res=%dx%d fps=%d",
+        VrLog.i("CONFIG", "mouse=%b sens=%d vert=%d%% edge=%b edge_deg=%d edge_steps=%b mouse_sync=%b band=%.1f steps=%b steps_threshold=%.1f strafe=%b strafe_deg=%d "
+                        + "ar=%b ar_joystick=%b analog=%b ar_cm=%d ipd=%dmm k1=%.2f ca=%.2f screen=%dcm/%dcm head_visual=%b res=%dx%d fps=%d",
                 prefConfig.vrHeadMouse, prefConfig.vrHeadMouseSensitivity, prefConfig.vrHeadMousePitchPercent,
                 prefConfig.vrEdgeTurn, prefConfig.vrEdgeTurnAngle, prefConfig.vrSnapTurn, prefConfig.vrMouseSync,
                 prefConfig.vrWalkPitchBand / 10f, prefConfig.vrWalk, prefConfig.vrWalkThreshold / 10f, prefConfig.vrStrafe, prefConfig.vrStrafeAngle,
@@ -2570,7 +2570,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 prefConfig.width, prefConfig.height, prefConfig.fps);
     }
 
-    // Nível do log de diagnóstico dos controles, com o celular no óculos:
+    // Level of the controls diagnostic log, with the phone in the headset:
     //   adb shell am broadcast -a com.limelight.debug.DECKVR_LOG --es mode off|on|verbose
     private void registerLogControl() {
         if (logReceiver != null) {
@@ -2581,7 +2581,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             public void onReceive(Context context, Intent intent) {
                 int level = VrLog.parse(intent.getStringExtra("mode"));
                 if (level < 0) {
-                    Log.w(VrLog.TAG, "LOG mode invalido; use off, on ou verbose");
+                    Log.w(VrLog.TAG, "LOG invalid mode; use off, on or verbose");
                     return;
                 }
                 VrLog.setLevel(level);
@@ -2599,10 +2599,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
     }
 
-    // Teste de latência do caminho do mouse (debug):
+    // Latency test of the mouse path (debug):
     //   adb shell am broadcast -a com.limelight.debug.DECKVR_MOUSE_TEST --ei n 20
-    // manda n movimentos alternados (+40/-40) e registra "MOUSE enviado ... t=" no log; a StereoGLView
-    // registra "PROBE mudou ... t=" quando o host pisca a tela (mesma base nanoTime, sem sincronizar relógios).
+    // sends n alternating moves (+40/-40) and logs "MOUSE sent ... t=" to the log; the StereoGLView
+    // logs "PROBE changed ... t=" when the host flashes the screen (same nanoTime base, no clock sync).
     private void registerMouseLatencyTest() {
         if (vrView == null || mouseTestReceiver != null) {
             return;
@@ -2618,14 +2618,14 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         for (int i = 0; i < n; i++) {
                             Thread.sleep(gapMs);
                             short dx = (short) (i % 2 == 0 ? 40 : -40);
-                            Log.i("DeckVR", "MOUSE enviado " + i + " t=" + System.nanoTime());
+                            Log.i("DeckVR", "MOUSE sent " + i + " t=" + System.nanoTime());
                             conn.sendMouseMove(dx, (short) 0);
                         }
                         Thread.sleep(gapMs);
                     } catch (InterruptedException ignored) {
                     }
                     vrView.setProbe(false);
-                    Log.i("DeckVR", "MOUSE teste fim");
+                    Log.i("DeckVR", "MOUSE test end");
                 }, "DeckVR-MouseTest").start();
             }
         };
@@ -2638,7 +2638,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
     }
 
-    // Teste sem mexer o celular: com o HeadMouse rodando, injeta desvio de yaw/pitch e oscilação de pitch por broadcast.
+    // Test without moving the phone: with the HeadMouse running, injects a yaw/pitch offset and a pitch bob by broadcast.
     // adb shell am broadcast -a com.limelight.debug.DECKVR_HEAD_TEST --ef yaw 60 --ef pitch 0 --ef bob_amp 2 --ef bob_hz 2 --ez walking true
     private void registerHeadTest() {
         if (headMouse == null || headTestReceiver != null) {
@@ -2921,7 +2921,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         }
                     });
                     if (!headMouse.start()) {
-                        LimeLog.warning("Sem giroscópio: cabeça = câmera indisponível");
+                        LimeLog.warning("No gyroscope: head = camera unavailable");
                         headMouse = null;
                     }
                 }
@@ -2936,7 +2936,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 if (prefConfig.vrCinema && prefConfig.vrStrafe && headStrafe == null) {
                     headStrafe = new HeadStrafe(Game.this, conn, prefConfig.vrStrafeAngle);
                     if (!headStrafe.start()) {
-                        LimeLog.warning("Sem giroscópio: inclinar a cabeça para andar de lado indisponível");
+                        LimeLog.warning("No gyroscope: head tilt strafing unavailable");
                         headStrafe = null;
                     }
                 }
@@ -2948,7 +2948,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 if (prefConfig.vrCinema && prefConfig.vrWalk && stepWalker == null) {
                     stepWalker = new StepWalker(Game.this, conn, prefConfig.vrWalkThreshold / 10f, moveStickOrNull());
                     if (!stepWalker.start()) {
-                        LimeLog.warning("Sem acelerômetro: andar no lugar indisponível");
+                        LimeLog.warning("No accelerometer: walking in place unavailable");
                         stepWalker = null;
                     }
                 }
@@ -3053,13 +3053,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             UiHelper.notifyStreamConnecting(Game.this);
 
             if (prefConfig.vrCinema) {
-                // O StreamView continua por baixo (ciclo de vida e entrada); o vídeo
-                // vai para a StereoGLView, que só inicia a conexão quando tem Surface
+                // The StreamView stays underneath (lifecycle and input); the video
+                // goes to the StereoGLView, which only starts the connection once it has a Surface
                 StereoGLView stereoView = vrView = new StereoGLView(this, prefConfig.width, prefConfig.height, prefConfig.enablePerfOverlay, prefConfig.vrHeadTracking && !prefConfig.vrHeadMouse,
                         prefConfig.vrScreenDistanceCm / 100f, prefConfig.vrScreenHeightCm / 100f, prefConfig.vrLensDistortion / 100f, prefConfig.vrChromatic / 100f, prefConfig.vrIpdMm / 1000f,
                         surface -> runOnUiThread(() -> {
                             if (vrConnectionStarted) {
-                                LimeLog.warning("Contexto GL recriado; a Surface do VR não foi religada ao decodificador");
+                                LimeLog.warning("GL context recreated; the VR Surface was not rebound to the decoder");
                                 return;
                             }
                             vrConnectionStarted = true;

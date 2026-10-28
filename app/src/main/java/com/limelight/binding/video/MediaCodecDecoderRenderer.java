@@ -276,7 +276,7 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
         this.renderTarget = renderTarget;
     }
 
-    // Usado pelo modo VR: o vídeo vai para uma textura OES em vez do SurfaceView
+    // Used by VR mode: the video goes to an OES texture instead of the SurfaceView
     public void setRenderTarget(Surface renderSurface) {
         this.renderSurface = renderSurface;
     }
@@ -1417,8 +1417,8 @@ public class MediaCodecDecoderRenderer extends VideoDecoderRenderer implements C
                 sb.append(context.getString(R.string.perf_overlay_dectime, decodeTimeMs));
                 perfListener.onPerfUpdate(sb.toString());
 
-                // Mesmos números do overlay, em linha única para o log de diagnóstico dos controles VR
-                VrLog.i("REDE", "fps=%.1f recebidos=%.1f renderizados=%.1f perda=%.2f%% rtt=%dms var=%dms host_ms=%.1f/%.1f/%.1f decodificacao=%.1fms",
+                // Same numbers as the overlay, on a single line for the VR controls diagnostic log
+                VrLog.i("NET", "fps=%.1f received=%.1f rendered=%.1f loss=%.2f%% rtt=%dms var=%dms host_ms=%.1f/%.1f/%.1f decode=%.1fms",
                         fps.totalFps, fps.receivedFps, fps.renderedFps,
                         lastTwo.totalFrames > 0 ? (float)lastTwo.framesLost / lastTwo.totalFrames * 100 : 0f,
                         (int)(rttInfo >> 32), (int)rttInfo,

@@ -1,21 +1,22 @@
 package com.limelight.vr;
 
-// Andar de verdade pelo ARCore, "só enquanto se move" (sem Android, testável na JVM): olha o deslocamento (frente, lado) na janela
-// dos últimos `windowNs`; se a cabeça andou mais que o limiar nessa janela, a tecla fica apertada; parou, solta em ~uma janela.
-// Ficar parada longe do ponto de partida não segura tecla (diferente do modo "joystick", que mede o deslocamento até a origem).
+// Real walking through ARCore, "only while moving" (no Android, testable on the JVM): looks at the displacement (forward, side)
+// over the last `windowNs`; if the head moved more than the threshold in that window, the key is held; once it stops, the key
+// is released within about one window.
+// Standing still far from the starting point does not hold a key (unlike "joystick" mode, which measures the displacement from the origin).
 //
-// `forward` positivo = frente, `side` positivo = direita (eixos do corpo, já calculados pelo ArPosition). Lados pedem
-// `sideFactor` vezes o limiar (a cabeça balança para os lados sem querer). Soltura em 60% do limiar (histerese).
+// Positive `forward` = ahead, positive `side` = right (body axes, already computed by ArPosition). Sideways moves ask for
+// `sideFactor` times the threshold (the head sways sideways unintentionally). Release at 60% of the threshold (hysteresis).
 //
-// Saltos de pose: ao recuperar o rastreamento o ARCore pode reposicionar a câmera de uma vez (~0,3 m entre dois quadros, o
-// que a 30 fps seria 9 m/s). Isso não é movimento de gente: um salto maior que JUMP_M entre amostras seguidas apaga o histórico
-// e solta as teclas, em vez de virar um toque de W/S/A/D (visto nos logs de 2026-10-27: `saltos=1` e S+D de ~0,4 s).
+// Pose jumps: when tracking is recovered, ARCore may reposition the camera all at once (~0.3 m between two frames, which
+// at 30 fps would be 9 m/s). That is not human movement: a jump larger than JUMP_M between consecutive samples clears the history
+// and releases the keys, instead of turning into a W/S/A/D tap (seen in the 2026-10-27 logs: `jumps=1` and an S+D of ~0.4 s).
 public class ArMotionKeys {
     private static final int CAPACITY = 128;
     private static final float RELEASE_FRACTION = 0.6f;
-    public static final float JUMP_M = 0.25f; // deslocamento entre duas amostras seguidas que não é de gente
+    public static final float JUMP_M = 0.25f; // displacement between two consecutive samples that is not human
 
-    public boolean jumped; // a última amostra foi um salto de pose
+    public boolean jumped; // the last sample was a pose jump
 
     private final float threshold;
     private final float sideThreshold;
@@ -27,7 +28,7 @@ public class ArMotionKeys {
     private int head, size;
 
     public boolean w, s, a, d;
-    public float lastForwardDelta, lastSideDelta; // deslocamento na janela, para o log
+    public float lastForwardDelta, lastSideDelta; // displacement over the window, for the log
 
     public ArMotionKeys(float thresholdM, float sideFactor, long windowNs) {
         this.threshold = thresholdM;
@@ -35,7 +36,7 @@ public class ArMotionKeys {
         this.windowNs = windowNs;
     }
 
-    // Origem mudou (recentrar) ou o rastreamento foi perdido: o histórico não vale mais
+    // The origin changed (recenter) or tracking was lost: the history is no longer valid
     public void reset() {
         size = 0;
         head = 0;
@@ -51,7 +52,7 @@ public class ArMotionKeys {
                 reset();
             }
         }
-        // Guarda a amostra
+        // Store the sample
         int idx = (head + size) % CAPACITY;
         if (size == CAPACITY) {
             head = (head + 1) % CAPACITY;
@@ -64,7 +65,7 @@ public class ArMotionKeys {
         forwards[idx] = forward;
         sides[idx] = side;
 
-        // Descarta o que saiu da janela, mas mantém a mais antiga dentro dela como referência
+        // Discard what left the window, but keep the oldest one inside it as the reference
         while (size > 1 && times[(head + 1) % CAPACITY] <= nowNs - windowNs) {
             head = (head + 1) % CAPACITY;
             size--;

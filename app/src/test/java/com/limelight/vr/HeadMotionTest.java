@@ -15,7 +15,7 @@ public class HeadMotionTest {
 
     @Before
     public void setUp() {
-        motion = new HeadMotion(10f, 1f); // 10 contagens por grau
+        motion = new HeadMotion(10f, 1f); // 10 counts per degree
         now = 1_000_000_000L;
     }
 
@@ -25,14 +25,14 @@ public class HeadMotionTest {
     }
 
     private void center(float yaw, float pitch) {
-        assertFalse("a primeira chamada só define o centro", motion.update(yaw, pitch, 1f, now, false));
+        assertFalse("the first call only sets the center", motion.update(yaw, pitch, 1f, now, false));
     }
 
     @Test
-    public void giroLentoViraContagensProporcionais() {
+    public void slowTurnBecomesProportionalCounts() {
         center(0, 0);
         int sumX = 0;
-        for (int i = 1; i <= 250; i++) { // 10° em 1 s
+        for (int i = 1; i <= 250; i++) { // 10° in 1 s
             tick(i * 0.04f, 0, false);
             sumX += motion.mx;
         }
@@ -40,26 +40,26 @@ public class HeadMotionTest {
     }
 
     @Test
-    public void olharParaCimaMoveOMouseParaCima() {
+    public void lookingUpMovesMouseUp() {
         center(0, 0);
         int sumY = 0;
         for (int i = 1; i <= 100; i++) {
-            tick(0, i * 0.1f, false); // 10° para cima
+            tick(0, i * 0.1f, false); // 10° up
             sumY += motion.my;
         }
-        assertEquals(-100, sumY, 1); // y positivo é para baixo
+        assertEquals(-100, sumY, 1); // positive y is down
     }
 
     @Test
-    public void voltaDe180GrausNaoViraSalto() {
+    public void wrapAround180DoesNotBecomeJump() {
         center(179.98f, 0);
-        tick(-179.98f, 0, false); // 0,04° para a direita
+        tick(-179.98f, 0, false); // 0.04° to the right
         assertEquals(0.04f, motion.rawDYaw, 0.001f);
         assertFalse(motion.jump);
     }
 
     @Test
-    public void ruidoAbaixoDaZonaMortaNaoMoveOMouse() {
+    public void noiseBelowDeadzoneDoesNotMoveMouse() {
         center(0, 0);
         float yaw = 0;
         int sumX = 0;
@@ -73,61 +73,61 @@ public class HeadMotionTest {
     }
 
     @Test
-    public void invalidarRecentraSemPulo() {
+    public void invalidateRecentersWithoutJump() {
         center(0, 0);
         tick(1, 0, false);
         motion.invalidate();
-        assertFalse(motion.update(90f, 0, 1f, now + TICK_NS, false)); // cabeça girou na pausa: só redefine o centro
+        assertFalse(motion.update(90f, 0, 1f, now + TICK_NS, false)); // head turned during the pause: only redefines the center
         assertEquals(0, motion.mx);
         tick(90.04f, 0, false);
         assertEquals(0.04f, motion.rawDYaw, 0.001f);
     }
 
     @Test
-    public void giroNaBordaContinuoChegaNaVelocidadeMaxima() {
+    public void continuousEdgeTurnReachesMaxSpeed() {
         motion.edgeDeg = 45;
         center(0, 0);
-        tick(60, 0, false); // o giro da cabeça até 60° não conta nesta medição
-        boolean entrou = motion.edgeEvent == HeadMotion.EVENT_STARTED;
+        tick(60, 0, false); // the head turn up to 60° does not count in this measurement
+        boolean entered = motion.edgeEvent == HeadMotion.EVENT_STARTED;
         int sumX = 0;
-        for (int i = 0; i < 250; i++) { // 1 s com a cabeça a 60° (15° além da borda = rampa cheia)
+        for (int i = 0; i < 250; i++) { // 1 s with the head at 60° (15° past the edge = full ramp)
             tick(60, 0, false);
-            entrou |= motion.edgeEvent == HeadMotion.EVENT_STARTED;
+            entered |= motion.edgeEvent == HeadMotion.EVENT_STARTED;
             sumX += motion.mx;
         }
-        assertTrue(entrou);
-        assertEquals(1200, sumX, 15); // 120°/s * 10 contagens/°
+        assertTrue(entered);
+        assertEquals(1200, sumX, 15); // 120°/s * 10 counts/°
     }
 
     @Test
-    public void giroNaBordaParaAoVoltarParaDentro() {
+    public void edgeTurnStopsWhenReturningInside() {
         motion.edgeDeg = 45;
         center(0, 0);
         for (int i = 0; i < 50; i++) tick(60, 0, false);
-        boolean saiu = false;
+        boolean left = false;
         int sumX = 0;
         for (int i = 0; i < 50; i++) {
             tick(30, 0, false);
-            saiu |= motion.edgeEvent == HeadMotion.EVENT_ENDED;
+            left |= motion.edgeEvent == HeadMotion.EVENT_ENDED;
             sumX += motion.edgeYaw != 0 ? 1 : 0;
         }
-        assertTrue(saiu);
+        assertTrue(left);
         assertEquals(0, sumX);
     }
 
     @Test
-    public void snapTurnGiraUmPassoEEsperaVoltarParaODentro() {
+    public void snapTurnTurnsOneStepAndWaitsToReturnInside() {
         motion.edgeDeg = 45;
         motion.snapTurn = true;
         center(0, 0);
         float total = 0;
-        for (int i = 0; i < 500; i++) { // 2 s olhando além da borda
+        for (int i = 0; i < 500; i++) { // 2 s looking past the edge
             tick(60, 0, false);
             total += motion.edgeYaw;
         }
-        assertEquals(HeadMotion.SNAP_STEP_DEG, total, 0.5f); // um passo só, mesmo segurando
+        assertEquals(HeadMotion.SNAP_STEP_DEG, total, 0.5f); // just one step, even when holding
 
-        for (int i = 0; i < 20; i++) tick(30, 0, false); // volta para perto do centro (re-arma)
+        for (int i = 0; i < 20; i++) tick(30, 0, false); // goes back near the center (re-arms)
         float second = 0;
         for (int i = 0; i < 500; i++) {
             tick(60, 0, false);
@@ -137,7 +137,7 @@ public class HeadMotionTest {
     }
 
     @Test
-    public void snapTurnParaOLadoNegativo() {
+    public void snapTurnToTheNegativeSide() {
         motion.edgeDeg = 45;
         motion.snapTurn = true;
         center(0, 0);
@@ -150,60 +150,60 @@ public class HeadMotionTest {
     }
 
     @Test
-    public void zonaMortaVerticalEngoleOBalancoMasNaoOOlharDeVerdade() {
+    public void verticalDeadzoneSwallowsSwayButNotRealLooking() {
         motion.walkPitchBandDeg = 1.5f;
         center(0, 0);
         int sumY = 0;
-        for (int i = 0; i < 500; i++) { // balanço de ±1° a 2 Hz andando
+        for (int i = 0; i < 500; i++) { // sway of ±1° at 2 Hz while walking
             tick(0, (float) Math.sin(2 * Math.PI * 2 * (i * 0.004)), true);
             sumY += Math.abs(motion.my);
         }
         assertEquals(0, sumY);
 
         int look = 0;
-        for (int i = 1; i <= 100; i++) { // olhar 10° para cima de propósito
+        for (int i = 1; i <= 100; i++) { // deliberately looking 10° up
             tick(0, i * 0.1f, true);
             look += motion.my;
         }
-        // atravessa tudo menos a faixa (1,5°) que a zona morta engole
+        // everything gets through except the band (1.5°) the deadzone swallows
         assertEquals(-85, look, 10);
     }
 
     @Test
-    public void semAndarOPitchPassaInteiro() {
+    public void withoutWalkingPitchPassesWhole() {
         motion.walkPitchBandDeg = 1.5f;
         center(0, 0);
         int sumY = 0;
         for (int i = 1; i <= 100; i++) {
-            tick(0, i * 0.01f, false); // 1° para cima, sem andar
+            tick(0, i * 0.01f, false); // 1° up, not walking
             sumY += motion.my;
         }
         assertEquals(-10, sumY, 1);
     }
 
     @Test
-    public void olhandoRetoParaBaixoOYawFicaCongelado() {
+    public void lookingStraightDownYawGetsFrozen() {
         center(0, -89.5f);
         now += TICK_NS;
-        motion.update(50f, -89.5f, 0.01f, now, false); // yaw instável perto do polo
+        motion.update(50f, -89.5f, 0.01f, now, false); // unstable yaw near the pole
         assertTrue(motion.gimbalFrozen);
         assertEquals(0, motion.mx);
         assertEquals(0f, motion.rawDYaw, 0.0001f);
         now += TICK_NS;
-        motion.update(50.04f, -85f, 0.5f, now, false); // saiu do polo: volta a valer
+        motion.update(50.04f, -85f, 0.5f, now, false); // left the pole: counts again
         assertFalse(motion.gimbalFrozen);
         assertEquals(0.04f, motion.rawDYaw, 0.001f);
     }
 
     @Test
-    public void saltoDeSensorEMarcado() {
+    public void sensorJumpIsMarked() {
         center(0, 0);
         tick(5f, 0, false);
         assertTrue(motion.jump);
     }
 
     @Test
-    public void recentrarComABordaAtivaAvisaOFimDela() {
+    public void recenteringWithActiveEdgeReportsItsEnd() {
         motion.edgeDeg = 45;
         center(0, 0);
         for (int i = 0; i < 50; i++) tick(60, 0, false);
@@ -212,7 +212,7 @@ public class HeadMotionTest {
         assertFalse(motion.update(60f, 0, 1f, now, false));
         assertEquals(HeadMotion.EVENT_ENDED, motion.edgeEvent);
         assertTrue(motion.eventTurned > 0);
-        tick(60.0f, 0, false); // com o novo centro em 60°, a borda não está mais ativa
+        tick(60.0f, 0, false); // with the new center at 60°, the edge is no longer active
         assertEquals(0f, motion.edgeYaw, 0f);
     }
 }

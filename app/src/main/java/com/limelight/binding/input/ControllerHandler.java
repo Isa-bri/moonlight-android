@@ -1074,8 +1074,8 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         }
     }
 
-    // Movimento do corpo como analógico esquerdo do controle 0 (fork DeckVR). Liga o controle virtual no host, então um
-    // Steam Deck usado ao mesmo tempo perde o analógico dele (conclusão da Fase 0): só para quem joga com controle no celular.
+    // Body movement as the left analog stick of controller 0 (DeckVR fork). It turns on the virtual controller on the host, so a
+    // Steam Deck used at the same time loses its own stick (Phase 0 conclusion): only for those who play with a controller on the phone.
     private volatile boolean motionStickEnabled;
     private volatile short motionStickX, motionStickY;
 
@@ -1083,7 +1083,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
         motionStickEnabled = enabled;
     }
 
-    // x para a direita, y para a frente, em [-1, 1]; chamar na thread principal
+    // x to the right, y forward, in [-1, 1]; call on the main thread
     public void setMotionStick(float x, float y) {
         if (!motionStickEnabled) {
             return;
@@ -1269,7 +1269,7 @@ public class ControllerHandler implements InputManager.InputDeviceListener, UsbD
             }
         }
         if (motionStickEnabled && controllerNumber == 0) {
-            // Movimento do corpo (ARCore / andar no lugar) como analógico esquerdo: vale o de maior intensidade
+            // Body movement (ARCore / walking in place) as the left analog stick: the one with the larger magnitude wins
             leftStickX = maxByMagnitude(leftStickX, motionStickX);
             leftStickY = maxByMagnitude(leftStickY, motionStickY);
         }

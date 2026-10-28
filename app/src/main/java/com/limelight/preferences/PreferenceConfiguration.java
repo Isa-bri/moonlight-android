@@ -112,7 +112,7 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_ENABLE_PIP = false;
     private static final boolean DEFAULT_VR_CINEMA = false;
     private static final boolean DEFAULT_VR_HEAD_TRACKING = true;
-    // 2,0 m de distância e 1,30 m de altura: tela de 60 graus de largura (16:9)
+    // 2.0 m distance and 1.30 m height: 60-degree-wide screen (16:9)
     private static final boolean DEFAULT_VR_HEAD_MOUSE = false;
     private static final int DEFAULT_VR_HEAD_MOUSE_SENSITIVITY = 10;
     private static final int DEFAULT_VR_HEAD_MOUSE_PITCH_PERCENT = 100;
@@ -188,23 +188,23 @@ public class PreferenceConfiguration {
     public int vrScreenHeightCm;
     public boolean vrHeadMouse;
     public boolean vrWalk;
-    public int vrWalkThreshold; // décimos de m/s² acima da gravidade para contar um passo
+    public int vrWalkThreshold; // tenths of m/s² above gravity to count a step
     public boolean vrStrafe;
-    public int vrStrafeAngle; // graus de inclinação da cabeça para segurar A/D
+    public int vrStrafeAngle; // degrees of head tilt to hold A/D
     public boolean vrPosition;
-    public int vrPositionDistance; // cm de deslocamento da cabeça (ARCore) para segurar W/A/S/D
-    public int vrChromatic; // separação vermelho/azul em centésimos de k1; 0 = sem correção
+    public int vrPositionDistance; // cm of head displacement (ARCore) to hold W/A/S/D
+    public int vrChromatic; // red/blue separation in hundredths of k1; 0 = no correction
     public int vrIpdMm;
-    public int vrLensDistortion; // k1 em centésimos; 0 = sem correção
-    public int vrHeadMousePitchPercent; // vertical em % da sensibilidade horizontal
+    public int vrLensDistortion; // k1 in hundredths; 0 = no correction
+    public int vrHeadMousePitchPercent; // vertical as a % of the horizontal sensitivity
     public boolean vrEdgeTurn;
-    public int vrEdgeTurnAngle; // graus para cada lado do centro antes de a câmera girar sozinha
-    public boolean vrPositionHold; // ARCore como joystick: segura a tecla enquanto longe da origem (padrão: só enquanto se move)
-    public boolean vrMoveAnalog;   // movimento do corpo vira analógico esquerdo de um controle virtual, em vez de W/A/S/D
-    public boolean vrSnapTurn;  // giro da borda em passos fixos em vez de contínuo
-    public boolean vrMouseSync; // manda o mouse a cada amostra do sensor, em vez de um tick de 4 ms
-    public int vrWalkPitchBand; // décimos de grau de zona morta vertical ao andar (0 = desligada)
-    public int vrHeadMouseSensitivity; // contagens de mouse por grau de rotação da cabeça
+    public int vrEdgeTurnAngle; // degrees on each side of center before the camera turns by itself
+    public boolean vrPositionHold; // ARCore as a joystick: holds the key while away from the origin (default: only while moving)
+    public boolean vrMoveAnalog;   // body movement becomes the left analog stick of a virtual controller, instead of W/A/S/D
+    public boolean vrSnapTurn;  // edge turn in fixed steps instead of continuous
+    public boolean vrMouseSync; // sends the mouse on every sensor sample, instead of a 4 ms tick
+    public int vrWalkPitchBand; // tenths of a degree of vertical deadzone while walking (0 = off)
+    public int vrHeadMouseSensitivity; // mouse counts per degree of head rotation
     public boolean enablePerfOverlay;
     public boolean enableLatencyToast;
     public boolean bindAllUsb;

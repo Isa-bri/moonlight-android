@@ -1,7 +1,7 @@
 package com.limelight.vr;
 
-// Destino do movimento quando o jogo usa analógico: o analógico esquerdo de um controle virtual (x para a direita, y para a
-// frente, cada um em [-1, 1]). Quando não há destino, o movimento sai como teclas W/A/S/D.
+// Movement destination when the game uses an analog stick: the left stick of a virtual controller (x to the right, y
+// forward, each in [-1, 1]). When there is no destination, movement goes out as W/A/S/D keys.
 public interface MoveStick {
     void setStick(float x, float y);
 }

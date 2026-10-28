@@ -1,11 +1,11 @@
 package com.limelight.vr;
 
-// Saída do movimento do corpo (andar de verdade, andar no lugar): teclas W/A/S/D ou o analógico esquerdo.
-// Sem Android: em produção liga em conn.sendKeyboardInput / ControllerHandler; no replay, só registra.
+// Output of body movement (real walking, walking in place): W/A/S/D keys or the left analog stick.
+// No Android: in production it is wired to conn.sendKeyboardInput / ControllerHandler; in replay it only records.
 public interface MoveOutput {
-    // key: 'W', 'A', 'S' ou 'D'
+    // key: 'W', 'A', 'S' or 'D'
     void key(char key, boolean down);
 
-    // x para a direita, y para a frente, em [-1, 1]
+    // x to the right, y forward, in [-1, 1]
     void stick(float x, float y);
 }

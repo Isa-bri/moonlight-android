@@ -7,12 +7,12 @@ import android.os.HandlerThread;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.input.KeyboardPacket;
 
-// Inclinar a cabeça para o ombro (rolagem) segura A ou D: esquerda = A, direita = D. A rolagem não é usada
-// para mirar, então não briga com a cabeça = câmera. Histerese de 5° para a tecla não ficar piscando.
+// Tilting the head toward the shoulder (roll) holds A or D: left = A, right = D. Roll is not used
+// for aiming, so it does not conflict with head = camera. 5° of hysteresis so the key does not flicker.
 //
-// Diagnóstico (VrLog, linhas LADO): cada troca de tecla com a rolagem do momento e quanto tempo a anterior ficou
-// segurada (troca em menos de 250 ms vira "TREME": limiar ou histerese apertados demais para o balanço da cabeça);
-// por segundo, a rolagem mínima/máxima, que só aparece quando chegou a metade do limiar ou há tecla segurada.
+// Diagnostics (VrLog, STRAFE lines): each key change with the roll at that moment and how long the previous one was
+// held (a change in under 250 ms is flagged "JITTER": threshold or hysteresis too tight for the head's sway);
+// once per second, the minimum/maximum roll, which only appears when it reached half the threshold or a key is held.
 public class HeadStrafe {
     static final short KEY_A = (short) 0x8041;
     static final short KEY_D = (short) 0x8044;
@@ -28,16 +28,16 @@ public class HeadStrafe {
     private HandlerThread thread;
     private Handler handler;
     private final float[] worldToEye = new float[16];
-    private short held; // 0, KEY_A ou KEY_D
+    private short held; // 0, KEY_A or KEY_D
 
-    // Diagnóstico, só na thread do tick
+    // Diagnostics, tick thread only
     private long heldSinceNs, lastChangeNs, winStartNs;
     private float winMinRoll = Float.MAX_VALUE, winMaxRoll = -Float.MAX_VALUE;
     private int winChanges;
 
     public HeadStrafe(Context context, NvConnection conn, float thresholdDeg) {
         this.conn = conn;
-        this.tracker = new HeadTracker(context, "LADO");
+        this.tracker = new HeadTracker(context, "STRAFE");
         this.thresholdDeg = thresholdDeg;
     }
 
@@ -49,7 +49,7 @@ public class HeadStrafe {
         thread.start();
         handler = new Handler(thread.getLooper());
         handler.post(this::tick);
-        VrLog.i("LADO", "iniciado limiar=%.0f graus histerese=%.0f graus passo=%dms", thresholdDeg, HYSTERESIS_DEG, TICK_MS);
+        VrLog.i("STRAFE", "started threshold=%.0f deg hysteresis=%.0f deg step=%dms", thresholdDeg, HYSTERESIS_DEG, TICK_MS);
         return true;
     }
 
@@ -66,8 +66,8 @@ public class HeadStrafe {
 
     private void tick() {
         if (tracker.getWorldToEye(worldToEye)) {
-            // Eixo "direita" do olho no mundo = linha 0 de worldToEye; sua altura é o seno da rolagem
-            // (positivo = orelha direita para cima = cabeça inclinada para a esquerda)
+            // The eye's "right" axis in the world = row 0 of worldToEye; its height is the sine of the roll
+            // (positive = right ear up = head tilted to the left)
             float roll = (float) Math.toDegrees(Math.asin(Math.max(-1f, Math.min(1f, worldToEye[8]))));
             short want = nextKey(roll, held, thresholdDeg, HYSTERESIS_DEG);
             set(want, roll);
@@ -78,8 +78,8 @@ public class HeadStrafe {
         }
     }
 
-    // Tecla a segurar para esta rolagem (positiva = inclinada para a esquerda): passa do limiar liga; só solta
-    // depois de voltar `hysteresis` graus para dentro dele
+    // Key to hold for this roll (positive = tilted to the left): crossing the threshold turns it on; it only releases
+    // after coming back `hysteresis` degrees inside it
     static short nextKey(float roll, short held, float thresholdDeg, float hysteresis) {
         float release = thresholdDeg - hysteresis;
         if (roll > thresholdDeg) return KEY_A;
@@ -97,9 +97,9 @@ public class HeadStrafe {
         winMinRoll = Math.min(winMinRoll, roll);
         winMaxRoll = Math.max(winMaxRoll, roll);
         if (now - winStartNs >= LOG_WINDOW_NS) {
-            // Ocioso e longe do limiar: nada a dizer
+            // Idle and far from the threshold: nothing to say
             if (held != 0 || Math.max(winMaxRoll, -winMinRoll) > thresholdDeg / 2) {
-                VrLog.i("LADO", "rolagem min=%+.1f max=%+.1f limiar=%.0f trocas=%d tecla=%s",
+                VrLog.i("STRAFE", "roll min=%+.1f max=%+.1f threshold=%.0f switches=%d key=%s",
                         winMinRoll, winMaxRoll, thresholdDeg, winChanges, name(held));
             }
             winStartNs = now;
@@ -119,8 +119,8 @@ public class HeadStrafe {
         }
         long now = System.nanoTime();
         boolean chatter = lastChangeNs != 0 && now - lastChangeNs < CHATTER_MS * 1_000_000L;
-        VrLog.i("LADO", "%s -> %s rolagem=%+.1f segurou=%.2fs%s", name(held), name(key), roll,
-                held != 0 ? (now - heldSinceNs) / 1e9 : 0.0, chatter ? " TREME" : "");
+        VrLog.i("STRAFE", "%s -> %s roll=%+.1f held=%.2fs%s", name(held), name(key), roll,
+                held != 0 ? (now - heldSinceNs) / 1e9 : 0.0, chatter ? " JITTER" : "");
         winChanges++;
         lastChangeNs = now;
         heldSinceNs = now;

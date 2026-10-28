@@ -1,28 +1,28 @@
 package com.limelight.vr;
 
-// Andar de verdade pelo ARCore, sem Android (testável na JVM e no replay): recebe a pose da câmera quadro a quadro e decide as
-// teclas W/A/S/D ou o analógico. Tudo que antes ficava dentro do ArPosition (projeção nos eixos do corpo, recentrar, salto de pose,
-// histerese do modo joystick, modos "só enquanto se move" e analógico) fica aqui, para o replay de um rastro gravado exercitar o
-// mesmo código que roda no celular.
+// Real walking through ARCore, without Android (testable on the JVM and in replay): receives the camera pose frame by frame and
+// decides the W/A/S/D keys or the analog stick. Everything that used to live inside ArPosition (projection onto the body axes,
+// recentering, pose jump, joystick-mode hysteresis, "only while moving" and analog modes) lives here, so replaying a recorded
+// trace exercises the same code that runs on the phone.
 //
-// Entrada por quadro: x, z da posição da câmera no mundo do ARCore (Y para cima), (hx, hz) = componentes horizontais do olhar
-// (-zAxis da pose; só a direção importa), e se o rastreamento está ativo. `requestRecenter()` marca a próxima pose como origem.
+// Per-frame input: x, z of the camera position in the ARCore world (Y up), (hx, hz) = horizontal components of the gaze
+// (-zAxis of the pose; only the direction matters), and whether tracking is active. `requestRecenter()` marks the next pose as the origin.
 public class ArPipeline {
-    public static final float JUMP_M = 0.25f;     // salto de pose entre dois quadros que não é movimento de gente
-    public static final float SIDE_FACTOR = 2f;   // lados pedem mais deslocamento: a cabeça balança sem querer
+    public static final float JUMP_M = 0.25f;     // pose jump between two frames that is not human movement
+    public static final float SIDE_FACTOR = 2f;   // sideways moves ask for more displacement: the head sways unintentionally
     public static final long WINDOW_NS = 500_000_000L;
 
     private final float thresholdM, releaseM, sideThresholdM, sideReleaseM;
-    private final boolean holdMode;   // true = joystick (segura enquanto longe da origem)
-    private final boolean analog;     // true = analógico em vez de teclas
+    private final boolean holdMode;   // true = joystick (holds while away from the origin)
+    private final boolean analog;     // true = analog stick instead of keys
     private final MoveOutput out;
     private final ArMotionKeys motion;
     private final ArMotionStick stick;
 
     private volatile boolean recenterRequested = true;
     private float originX, originZ;
-    private float fwdX, fwdZ = -1;     // olhar atual
-    private float bodyX, bodyZ = -1;   // frente do corpo, fixada na origem
+    private float fwdX, fwdZ = -1;     // current gaze
+    private float bodyX, bodyZ = -1;   // body forward, fixed at the origin
     private float prevX, prevZ;
     private boolean hasPrevPose;
     private float lastStickX, lastStickY;
@@ -30,13 +30,13 @@ public class ArPipeline {
     public boolean fwdHeld, backHeld, leftHeld, rightHeld;
     public volatile boolean stickWalking;
 
-    // Resultado do último onFrame(), para o log do chamador
-    public float curForward, curSide;      // deslocamento nos eixos do corpo (já com o deslocamento de teste)
+    // Result of the last onFrame(), for the caller's log
+    public float curForward, curSide;      // displacement on the body axes (already including the test displacement)
     public boolean poseJumped, recentered;
     public float recenterBeforeForward, recenterBeforeSide;
     public float stickX, stickY;
 
-    // Só para testes: soma ao deslocamento medido; zerado ao recentrar
+    // Tests only: added to the measured displacement; zeroed on recenter
     public float testForward, testSide;
 
     public ArPipeline(float thresholdM, boolean holdMode, boolean analog, MoveOutput out) {
@@ -59,7 +59,7 @@ public class ArPipeline {
         return fwdHeld || backHeld || leftHeld || rightHeld || stickWalking;
     }
 
-    // false se o rastreamento não está ativo (nada é decidido; tudo é solto)
+    // false if tracking is not active (nothing is decided; everything is released)
     public boolean onFrame(long tNs, float x, float z, float hx, float hz, boolean tracking) {
         poseJumped = false;
         recentered = false;
@@ -72,7 +72,7 @@ public class ArPipeline {
 
         if (hasPrevPose && Math.hypot(x - prevX, z - prevZ) > JUMP_M) {
             poseJumped = true;
-            // A origem acompanha o salto, então o deslocamento fica contínuo (vale para o modo joystick)
+            // The origin follows the jump, so the displacement stays continuous (applies to joystick mode)
             originX += x - prevX;
             originZ += z - prevZ;
         }
@@ -81,7 +81,7 @@ public class ArPipeline {
         hasPrevPose = true;
 
         float hLen = (float) Math.hypot(hx, hz);
-        if (hLen > 0.3f) { // olhando quase reto para cima/baixo: mantém a última frente
+        if (hLen > 0.3f) { // looking almost straight up/down: keep the last forward
             fwdX = hx / hLen;
             fwdZ = hz / hLen;
         }
@@ -101,7 +101,7 @@ public class ArPipeline {
         }
 
         float dx = x - originX, dz = z - originZ;
-        // direita = (-bodyZ, bodyX) no sistema do ARCore (Y para cima, olhando para -Z)
+        // right = (-bodyZ, bodyX) in the ARCore system (Y up, looking toward -Z)
         float forward = dx * bodyX + dz * bodyZ + testForward;
         float side = dx * -bodyZ + dz * bodyX + testSide;
         curForward = forward;
@@ -143,7 +143,7 @@ public class ArPipeline {
         return true;
     }
 
-    // Solta tudo (rastreamento perdido, recentrada, encerramento)
+    // Release everything (tracking lost, recenter, shutdown)
     public void releaseAll() {
         if (analog) {
             stick.reset();
@@ -156,7 +156,7 @@ public class ArPipeline {
         if (leftHeld) { leftHeld = false; out.key('A', false); }
     }
 
-    // Manda o analógico quando muda o bastante (1/256) e sempre que volta a zero
+    // Send the stick when it changes enough (1/256) and whenever it returns to zero
     private void sendStick(float x, float y) {
         boolean zero = x == 0 && y == 0;
         if (zero ? (lastStickX == 0 && lastStickY == 0)

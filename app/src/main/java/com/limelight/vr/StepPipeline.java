@@ -1,8 +1,8 @@
 package com.limelight.vr;
 
-// Andar no lugar sem Android (testável na JVM e no replay): amostras do acelerômetro entram com o timestamp do sensor e a tecla
-// W (ou o analógico para a frente) sobe e desce só por esses timestamps: nada de Handler/postDelayed, para o replay reproduzir
-// exatamente o que roda no celular. A soltura é conferida a cada amostra (~100 Hz, então a precisão é de ~10 ms).
+// Walking in place without Android (testable on the JVM and in replay): accelerometer samples come in with the sensor timestamp
+// and the W key (or the analog stick forward) goes down and up based only on those timestamps: no Handler/postDelayed, so the
+// replay reproduces exactly what runs on the phone. The release is checked on every sample (~100 Hz, so the precision is ~10 ms).
 public class StepPipeline {
     private final StepDetector detector;
     private final long releaseNs;
@@ -13,7 +13,7 @@ public class StepPipeline {
     private long lastStepNs;
     public int walkSteps;
     public long walkStartNs, lastReleaseNs;
-    public boolean pressedNow, releasedNow; // eventos da última amostra, para o log do chamador
+    public boolean pressedNow, releasedNow; // events of the last sample, for the caller's log
 
     public StepPipeline(float threshold, long minIntervalNs, long armWindowNs, long releaseNs, boolean analog, MoveOutput out) {
         this.detector = new StepDetector(threshold, minIntervalNs, armWindowNs);
@@ -30,7 +30,7 @@ public class StepPipeline {
         return down;
     }
 
-    // true se esta amostra foi um passo
+    // true if this sample was a step
     public boolean onSample(float x, float y, float z, long tsNs) {
         pressedNow = releasedNow = false;
         boolean step = detector.onSample(x, y, z, tsNs);
@@ -53,7 +53,7 @@ public class StepPipeline {
         return step;
     }
 
-    // Encerramento: solta se estiver apertada
+    // Shutdown: releases if pressed
     public void stop(long tsNs) {
         if (down) {
             release(tsNs);

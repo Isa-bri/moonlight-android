@@ -4,18 +4,18 @@ import android.util.Log;
 
 import java.util.Locale;
 
-// Registro de diagnóstico dos controles VR (para deixar a cabeça, os passos e as teclas suaves e sem trancos).
+// Diagnostic log of the VR controls (to keep the head, the steps and the keys smooth and jerk-free).
 //
-// Tudo sai com a tag "DeckVR" e um prefixo de componente (HM, SENSOR, PASSO, LADO, AR, VOL, GL, REDE, CONFIG), no formato
-// `PREFIXO chave=valor chave=valor`, para um script ler: `adb logcat -v time -s DeckVR`.
+// Everything goes out with the "DeckVR" tag and a component prefix (HM, SENSOR, STEP, STRAFE, AR, VOL, GL, NET, CONFIG), in the
+// format `PREFIX key=value key=value`, for a script to read: `adb logcat -v time -s DeckVR`.
 //
-// Regras: nada de log a cada tick (o HeadMouse roda a ~250 Hz e logar ali causaria o tranco que se quer medir). Os
-// componentes contam dentro do laço e imprimem um resumo por segundo, mais uma linha por evento discreto.
+// Rules: no logging on every tick (HeadMouse runs at ~250 Hz and logging there would cause the very jerk we want to measure).
+// Components count inside the loop and print a summary per second, plus one line per discrete event.
 //
-// Nível pode mudar com o celular no óculos: adb shell am broadcast -a com.limelight.debug.DECKVR_LOG --es mode off|on|verbose
-//   off     = nada
-//   on      = resumos por segundo e eventos (padrão)
-//   verbose = também cada pico isolado (tick atrasado, passo grande do mouse), no máximo 10 por segundo
+// The level can change while the phone is in the headset: adb shell am broadcast -a com.limelight.debug.DECKVR_LOG --es mode off|on|verbose
+//   off     = nothing
+//   on      = per-second summaries and events (default)
+//   verbose = also every isolated spike (late tick, large mouse step), at most 10 per second
 public final class VrLog {
     public static final String TAG = "DeckVR";
     public static final String ACTION = "com.limelight.debug.DECKVR_LOG";
@@ -30,11 +30,11 @@ public final class VrLog {
 
     public static void setLevel(int newLevel) {
         level = newLevel;
-        // Sempre aparece, mesmo ao desligar (avisa que o silêncio é de propósito)
-        Log.i(TAG, "LOG nivel=" + (newLevel == OFF ? "off" : newLevel == VERBOSE ? "verbose" : "on"));
+        // Always shows up, even when turning off (tells that the silence is on purpose)
+        Log.i(TAG, "LOG level=" + (newLevel == OFF ? "off" : newLevel == VERBOSE ? "verbose" : "on"));
     }
 
-    // off | on | verbose; -1 se o texto não for reconhecido
+    // off | on | verbose; -1 if the text is not recognized
     public static int parse(String mode) {
         if (mode == null) return -1;
         switch (mode.toLowerCase(Locale.ROOT)) {
@@ -53,7 +53,7 @@ public final class VrLog {
         return level >= VERBOSE;
     }
 
-    // Os números saem sempre com ponto decimal (Locale.US), qualquer que seja o idioma do celular
+    // Numbers always come out with a decimal point (Locale.US), whatever the phone's language
     public static void i(String component, String format, Object... args) {
         if (level >= ON) {
             Log.i(TAG, component + " " + String.format(Locale.US, format, args));

@@ -107,8 +107,8 @@ public class UiHelper {
                     view.setPadding(view.getPaddingLeft(),
                             view.getPaddingTop(),
                             view.getPaddingRight(),
-                            // O inset "tappable" some em alguns modos de navegação e a barra
-                            // acaba cobrindo o fim da lista; o inset estável nunca some
+                            // The "tappable" inset disappears in some navigation modes and the bar
+                            // ends up covering the end of the list; the stable inset never disappears
                             Math.max(windowInsets.getTappableElementInsets().bottom,
                                     windowInsets.getStableInsetBottom()));
                     return windowInsets;

@@ -13,41 +13,41 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-// Reexecuta, pelas classes de produção, todos os rastros de steamdeck-phone-vr/testes/rastros (sintéticos e reais) contra as
-// regras que acompanham cada um. A pasta vem de DECKVR_RASTROS ou de ../../steamdeck-phone-vr/testes/rastros (repositório irmão).
-// Sem a pasta, o teste é pulado (não passa por não ter conferido nada).
+// Re-runs, through the production classes, all traces in steamdeck-phone-vr/tests/traces (synthetic and real) against the
+// rules that accompany each one. The folder comes from DECKVR_TRACES or from ../../steamdeck-phone-vr/tests/traces (sibling repository).
+// Without the folder, the test is skipped (it does not pass just because it checked nothing).
 public class ReplayTest {
-    private static File pasta() {
-        String env = System.getenv("DECKVR_RASTROS");
-        return new File(env != null ? env : "../../steamdeck-phone-vr/testes/rastros");
+    private static File folder() {
+        String env = System.getenv("DECKVR_TRACES");
+        return new File(env != null ? env : "../../steamdeck-phone-vr/tests/traces");
     }
 
     @Test
-    public void todosOsRastrosCumpremAsRegras() throws IOException {
-        File dir = pasta();
-        assumeTrue("pasta de rastros não encontrada: " + dir.getAbsolutePath(), dir.isDirectory());
+    public void allTracesMeetTheirRules() throws IOException {
+        File dir = folder();
+        assumeTrue("traces folder not found: " + dir.getAbsolutePath(), dir.isDirectory());
         File[] csvs = dir.listFiles((d, n) -> n.endsWith(".csv"));
-        assumeTrue("nenhum rastro em " + dir, csvs != null && csvs.length > 0);
+        assumeTrue("no traces in " + dir, csvs != null && csvs.length > 0);
         Arrays.sort(csvs);
-        List<String> falhas = new ArrayList<>();
+        List<String> failures = new ArrayList<>();
         for (File csv : csvs) {
             String base = csv.getName().substring(0, csv.getName().length() - 4);
-            File regras = new File(dir, base + ".regras");
-            if (!regras.exists()) {
-                falhas.add(base + ": sem arquivo .regras");
+            File rules = new File(dir, base + ".rules");
+            if (!rules.exists()) {
+                failures.add(base + ": no .rules file");
                 continue;
             }
             ReplayRunner.Result r = ReplayRunner.run(base, Files.readAllLines(csv.toPath(), StandardCharsets.UTF_8),
-                    Files.readAllLines(regras.toPath(), StandardCharsets.UTF_8));
+                    Files.readAllLines(rules.toPath(), StandardCharsets.UTF_8));
             for (String l : r.lines) {
-                if (l.startsWith("FALHOU")) {
-                    falhas.add(base + ": " + l);
+                if (l.startsWith("FAILED")) {
+                    failures.add(base + ": " + l);
                 }
             }
             if (r.checked == 0) {
-                falhas.add(base + ": nada foi conferido");
+                failures.add(base + ": nothing was checked");
             }
         }
-        assertTrue("Falhas no replay:\n" + String.join("\n", falhas), falhas.isEmpty());
+        assertTrue("Replay failures:\n" + String.join("\n", failures), failures.isEmpty());
     }
 }

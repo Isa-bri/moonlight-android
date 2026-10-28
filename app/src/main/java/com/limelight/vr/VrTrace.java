@@ -9,19 +9,19 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
-// Gravador de rastros brutos (opt-in; desligado por padrão) para reexecutar a lógica dos controles num replay, no celular ou
-// na JVM. Grava as ENTRADAS das classes puras, não as saídas: o replay refaz as saídas com o código atual.
+// Recorder of raw traces (opt-in; off by default) to re-run the controls logic in a replay, on the phone or
+// on the JVM. It records the INPUTS of the pure classes, not the outputs: the replay redoes the outputs with the current code.
 //
-// Formato (CSV, uma linha por evento; `tc` = System.nanoTime()/1e6 no momento do registro, base comum a todas as fontes;
-// `t` = o timestamp que a própria classe recebeu, na base dela):
-//   cfg,tc,chave=valor;chave=valor        parâmetros em vigor (sens, borda, ar_cm, ...)
-//   m,tc,rotulo                           marca de verdade-de-campo ("parada", "frente", ...) enviada por broadcast
-//   ar,tc,t,x,z,hx,hz,rastreando          pose do ARCore (hx,hz = olhar horizontal)
-//   acc,tc,t,x,y,z                        acelerômetro
-//   hm,tc,t,yaw,pitch,horiz,andando,pausado   leitura da cabeça a cada poll (yaw/pitch em graus)
-//   v,tc,evento                           botões de volume (recentrar, pausa, embreagem)
-// Nunca grava a partir do tick de 4 ms: as linhas entram numa fila limitada e uma thread própria escreve; se a fila encher,
-// a linha é descartada e contada (`dropped`), nunca bloqueia.
+// Format (CSV, one line per event; `tc` = System.nanoTime()/1e6 at the moment of recording, a base common to all sources;
+// `t` = the timestamp the class itself received, in its own base):
+//   cfg,tc,key=value;key=value            parameters in effect (sens, edge, ar_cm, ...)
+//   m,tc,label                            ground-truth mark ("still", "forward", ...) sent by broadcast
+//   ar,tc,t,x,z,hx,hz,tracking            ARCore pose (hx,hz = horizontal gaze)
+//   acc,tc,t,x,y,z                        accelerometer
+//   hm,tc,t,yaw,pitch,horiz,walking,paused    head reading on each poll (yaw/pitch in degrees)
+//   v,tc,event                            volume buttons (recenter, pause_on, pause_off, clutch_on, clutch_off)
+// Never records from the 4 ms tick: lines go into a bounded queue and a dedicated thread writes them; if the queue fills up,
+// the line is dropped and counted (`dropped`), never blocking.
 public final class VrTrace {
     private static final int QUEUE_SIZE = 16384;
 
@@ -116,7 +116,7 @@ public final class VrTrace {
         rec("m," + nowMs() + "," + label);
     }
 
-    // As fontes montam as linhas com concatenação simples (Float.toString usa sempre ponto decimal)
+    // The sources build the lines with plain concatenation (Float.toString always uses a decimal point)
     public static void ar(long tNs, float x, float z, float hx, float hz, boolean tracking) {
         if (on) {
             rec("ar," + nowMs() + "," + tNs + "," + x + "," + z + "," + hx + "," + hz + "," + (tracking ? 1 : 0));

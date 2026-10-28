@@ -1,14 +1,14 @@
 package com.limelight.vr;
 
-// Detector de passos sem Android (testável na JVM): recebe amostras do acelerômetro e diz quando houve um passo.
+// Step detector without Android (testable on the JVM): receives accelerometer samples and says when a step happened.
 //
-// A gravidade é estimada por filtro passa-baixa; um pico de |a| acima dela (`threshold`), com pelo menos `minIntervalNs`
-// desde o passo anterior, conta como passo. Amostras acima de 60% do limiar formam um "solavanco": se nenhum virou passo,
-// é um quase passo (perdido por sensibilidade, ou perto demais do passo anterior).
+// Gravity is estimated by a low-pass filter; a peak of |a| above it (`threshold`), at least `minIntervalNs` after the
+// previous step, counts as a step. Samples above 60% of the threshold form a "bump": if none of them became a step,
+// it is a near step (missed because of sensitivity, or too close to the previous step).
 //
-// Confirmação de caminhada: um passo isolado (o celular batendo ao ser pego ou solto) não conta. A caminhada só é
-// confirmada no segundo passo, desde que venha em até `armWindowNs` do primeiro; depois disso cada passo dentro dessa janela
-// mantém a confirmação, e uma pausa maior que a janela zera tudo.
+// Walking confirmation: an isolated step (the phone being bumped as it is picked up or put down) does not count. Walking is
+// only confirmed on the second step, as long as it comes within `armWindowNs` of the first; after that each step inside
+// that window keeps the confirmation, and a pause longer than the window resets everything.
 public class StepDetector {
     public static final float NEAR_MISS_FRACTION = 0.6f;
 
@@ -22,14 +22,14 @@ public class StepDetector {
     private boolean inBump, bumpStepped, bumpTooSoon;
     private float bumpPeak;
 
-    // Resultado da última amostra
-    public float excess;            // |a| acima da gravidade
-    public long sinceLastStepMs;    // só vale quando a amostra foi um passo; -1 no primeiro
-    public boolean bumpEnded;       // um solavanco terminou nesta amostra...
-    public boolean bumpWasMiss;     // ...e não virou passo (quase passo)
-    public float missPeak;          // pico do quase passo
-    public boolean missTooSoon;     // quase passo por estar perto do passo anterior
-    public boolean walking;         // a caminhada está confirmada (vale depois do segundo passo seguido)
+    // Result of the last sample
+    public float excess;            // |a| above gravity
+    public long sinceLastStepMs;    // only valid when the sample was a step; -1 on the first
+    public boolean bumpEnded;       // a bump ended on this sample...
+    public boolean bumpWasMiss;     // ...and did not become a step (near step)
+    public float missPeak;          // peak of the near step
+    public boolean missTooSoon;     // near step because it is close to the previous step
+    public boolean walking;         // walking is confirmed (holds after the second consecutive step)
 
     public StepDetector(float threshold, long minIntervalNs, long armWindowNs) {
         this.threshold = threshold;
@@ -41,7 +41,7 @@ public class StepDetector {
         return gravity;
     }
 
-    // true se esta amostra é um passo
+    // true if this sample is a step
     public boolean onSample(float x, float y, float z, long timestampNs) {
         float mag = (float) Math.sqrt(x * x + y * y + z * z);
         gravity += 0.05f * (mag - gravity);
@@ -52,7 +52,7 @@ public class StepDetector {
         if (excess > threshold && timestampNs - lastStepNs > minIntervalNs) {
             step = true;
             sinceLastStepMs = lastStepNs == 0 ? -1 : (timestampNs - lastStepNs) / 1_000_000;
-            // Segundo passo dentro da janela confirma; passo depois de uma pausa longa recomeça (sem confirmar)
+            // A second step inside the window confirms; a step after a long pause starts over (without confirming)
             confirmed = lastStepNs != 0 && timestampNs - lastStepNs <= armWindowNs;
             lastStepNs = timestampNs;
         }

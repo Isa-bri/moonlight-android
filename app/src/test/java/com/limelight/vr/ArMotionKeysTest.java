@@ -25,26 +25,26 @@ public class ArMotionKeysTest {
     }
 
     @Test
-    public void paradoNaoApertaNada() {
-        for (int i = 0; i < 90; i++) frame(0.01f * (i % 2), 0.01f * (i % 3)); // balanço de ~1-2 cm
+    public void standingStillPressesNothing() {
+        for (int i = 0; i < 90; i++) frame(0.01f * (i % 2), 0.01f * (i % 3)); // sway of ~1-2 cm
         assertFalse(keys.w || keys.s || keys.a || keys.d);
     }
 
     @Test
-    public void andarParaAFrenteApertaWePararSolta() {
+    public void walkingForwardPressesWAndStoppingReleases() {
         float f = 0;
-        for (int i = 0; i < 30; i++) { // 1 s a 0,6 m/s
+        for (int i = 0; i < 30; i++) { // 1 s at 0.6 m/s
             f += 0.02f;
             frame(f, 0);
         }
         assertTrue(keys.w);
         assertFalse(keys.s);
-        for (int i = 0; i < 30; i++) frame(f, 0); // parou 1 s, longe da origem
-        assertFalse("parou: W deve soltar mesmo deslocada da origem", keys.w);
+        for (int i = 0; i < 30; i++) frame(f, 0); // stopped for 1 s, far from the origin
+        assertFalse("stopped: W must release even when displaced from the origin", keys.w);
     }
 
     @Test
-    public void andarParaTrasApertaS() {
+    public void walkingBackPressesS() {
         float f = 0;
         for (int i = 0; i < 30; i++) {
             f -= 0.02f;
@@ -55,9 +55,9 @@ public class ArMotionKeysTest {
     }
 
     @Test
-    public void passoParaOLadoPedeOLimiarDobrado() {
+    public void sidestepNeedsDoubledThreshold() {
         float x = 0;
-        for (int i = 0; i < 30; i++) { // 0,6 m/s para a direita: 0,3 m em 0,5 s, acima de 20 cm
+        for (int i = 0; i < 30; i++) { // 0.6 m/s to the right: 0.3 m in 0.5 s, above 20 cm
             x += 0.02f;
             frame(0, x);
         }
@@ -65,7 +65,7 @@ public class ArMotionKeysTest {
         assertFalse(keys.a);
         keys.reset();
         x = 0;
-        for (int i = 0; i < 30; i++) { // deslize curto de 3 cm/quadro... 0,05 m/s: não conta
+        for (int i = 0; i < 30; i++) { // short slide of 3 cm/frame... 0.05 m/s: does not count
             x -= 0.0015f;
             frame(0, x);
         }
@@ -73,13 +73,13 @@ public class ArMotionKeysTest {
     }
 
     @Test
-    public void balancoLateralPequenoNaoViraLado() {
-        for (int i = 0; i < 60; i++) frame(0, (i % 10 < 5 ? 1 : -1) * 0.06f); // ±6 cm, abaixo de 20 cm
+    public void smallLateralSwayDoesNotBecomeSide() {
+        for (int i = 0; i < 60; i++) frame(0, (i % 10 < 5 ? 1 : -1) * 0.06f); // ±6 cm, below 20 cm
         assertFalse(keys.a || keys.d);
     }
 
     @Test
-    public void resetLimpaTeclasEHistorico() {
+    public void resetClearsKeysAndHistory() {
         float f = 0;
         for (int i = 0; i < 30; i++) {
             f += 0.02f;
@@ -88,15 +88,15 @@ public class ArMotionKeysTest {
         assertTrue(keys.w);
         keys.reset();
         assertFalse(keys.w);
-        frame(5f, 5f); // origem mudou: a primeira amostra nova não pode virar "salto" de movimento
+        frame(5f, 5f); // origin changed: the first new sample cannot become a movement "jump"
         assertEquals(0f, keys.lastForwardDelta, 0f);
         assertFalse(keys.w || keys.d);
     }
 
     @Test
-    public void saltoDePoseNaoViraToqueDeTecla() {
-        // Reproduz o que os logs de 2026-10-27 mostraram: parada, a pose salta ~0,3 m (recuperação do rastreamento)
-        // e depois volta de uma vez; nada disso é movimento de gente
+    public void poseJumpDoesNotBecomeKeyPress() {
+        // Reproduces what the 2026-10-27 logs showed: standing still, the pose jumps ~0.3 m (tracking recovery)
+        // and then comes back all at once; none of that is a person moving
         for (int i = 0; i < 30; i++) frame(0.03f, 0f);
         frame(0.31f, -0.21f);
         assertTrue(keys.jumped);
@@ -105,7 +105,7 @@ public class ArMotionKeysTest {
             frame(0.31f, -0.21f);
             assertFalse(keys.w || keys.a);
         }
-        frame(0.03f, 0f); // volta de uma vez
+        frame(0.03f, 0f); // comes back all at once
         assertTrue(keys.jumped);
         assertFalse(keys.w || keys.s || keys.a || keys.d);
         for (int i = 0; i < 30; i++) frame(0.03f, 0f);
@@ -113,9 +113,9 @@ public class ArMotionKeysTest {
     }
 
     @Test
-    public void passoRapidoNormalNaoEConfundidoComSalto() {
+    public void normalFastStepIsNotMistakenForJump() {
         float f = 0;
-        for (int i = 0; i < 30; i++) { // 1,5 m/s: 5 cm por quadro, bem abaixo dos 25 cm de salto
+        for (int i = 0; i < 30; i++) { // 1.5 m/s: 5 cm per frame, well below the 25 cm jump
             f += 0.05f;
             frame(f, 0);
             assertFalse(keys.jumped);
@@ -124,8 +124,8 @@ public class ArMotionKeysTest {
     }
 
     @Test
-    public void passoParaOLadoNaoAcionaWouS() {
-        // Passo lateral limpo como nos logs (frente varia ±2 cm): só D
+    public void sidestepDoesNotTriggerWOrS() {
+        // Clean sidestep as in the logs (forward varies ±2 cm): only D
         float x = 0;
         for (int i = 0; i < 30; i++) {
             x += 0.02f;

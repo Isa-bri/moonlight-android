@@ -15,11 +15,11 @@ public class ArMotionStickTest {
 
     @Before
     public void setUp() {
-        stick = new ArMotionStick(0.10f, 0.40f, 500_000_000L); // zona morta 10 cm e cheio em 40 cm, em 0,5 s
+        stick = new ArMotionStick(0.10f, 0.40f, 500_000_000L); // deadzone 10 cm and full at 40 cm, in 0.5 s
         t = 1_000_000_000L;
     }
 
-    // Anda `frames` quadros com velocidade (frente, lado) em m/s; devolve a posição final
+    // Walks `frames` frames at velocity (forward, side) in m/s; returns the final position
     private float[] walk(float vForward, float vSide, int frames, float f0, float s0) {
         float f = f0, s = s0;
         for (int i = 0; i < frames; i++) {
@@ -32,10 +32,10 @@ public class ArMotionStickTest {
     }
 
     @Test
-    public void paradoNaoMexeOAnalogico() {
+    public void standingStillDoesNotMoveStick() {
         walk(0, 0, 60, 0, 0);
         assertEquals(0f, stick.magnitude, 0.001f);
-        for (int i = 0; i < 60; i++) { // balanço de 1 cm
+        for (int i = 0; i < 60; i++) { // sway of 1 cm
             t += FRAME_NS;
             stick.update(0.01f * (i % 2), 0.01f * (i % 3), t);
         }
@@ -43,27 +43,27 @@ public class ArMotionStickTest {
     }
 
     @Test
-    public void andarRapidoParaAFrenteChegaPertoDoMaximo() {
-        walk(1.0f, 0, 45, 0, 0); // 1 m/s: 50 cm na janela, acima dos 40 cm
+    public void walkingFastForwardReachesNearMax() {
+        walk(1.0f, 0, 45, 0, 0); // 1 m/s: 50 cm in the window, above the 40 cm
         assertEquals(1f, stick.y, 0.05f);
         assertEquals(0f, stick.x, 0.05f);
     }
 
     @Test
-    public void intensidadeAumentaComAVelocidade() {
-        walk(0.30f, 0, 45, 0, 0);  // 15 cm na janela: logo acima da zona morta
-        float devagar = stick.y;
+    public void intensityGrowsWithSpeed() {
+        walk(0.30f, 0, 45, 0, 0);  // 15 cm in the window: just above the deadzone
+        float slow = stick.y;
         stick.reset();
         walk(0.60f, 0, 45, 0, 0);  // 30 cm
-        float medio = stick.y;
+        float medium = stick.y;
         stick.reset();
         walk(1.0f, 0, 45, 0, 0);
-        float rapido = stick.y;
-        assertTrue(devagar > 0 && devagar < medio && medio < rapido);
+        float fast = stick.y;
+        assertTrue(slow > 0 && slow < medium && medium < fast);
     }
 
     @Test
-    public void paraTrasEParaOsLadosTemOSinalCerto() {
+    public void backAndSidesHaveTheRightSign() {
         walk(-0.8f, 0, 45, 0, 0);
         assertTrue(stick.y < -0.5f);
         stick.reset();
@@ -75,22 +75,22 @@ public class ArMotionStickTest {
     }
 
     @Test
-    public void diagonalMantemOAnguloEIntensidadePertoDeUm() {
+    public void diagonalKeepsAngleAndIntensityNearOne() {
         walk(0.7f, 0.7f, 45, 0, 0); // 45° a ~1 m/s
         assertEquals(stick.x, stick.y, 0.05f);
         assertTrue(stick.magnitude > 0.8f && stick.magnitude <= 1f);
     }
 
     @Test
-    public void pararSoltaRapidoMesmoLongeDaOrigem() {
+    public void stoppingReleasesQuicklyEvenFarFromOrigin() {
         float[] p = walk(1.0f, 0, 45, 0, 0);
         assertTrue(stick.magnitude > 0.8f);
-        walk(0, 0, 25, p[0], p[1]); // parou ~0,8 s
+        walk(0, 0, 25, p[0], p[1]); // stopped for ~0.8 s
         assertEquals(0f, stick.magnitude, 0.02f);
     }
 
     @Test
-    public void saltoDePoseZeraOAnalogico() {
+    public void poseJumpZeroesTheStick() {
         walk(0, 0, 30, 0, 0);
         t += FRAME_NS;
         stick.update(0.31f, -0.21f, t);

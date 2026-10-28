@@ -13,17 +13,17 @@ import android.os.SystemClock;
 import android.view.Surface;
 import android.view.WindowManager;
 
-// Orientação da cabeça (celular no óculos, em paisagem) a partir do TYPE_GAME_ROTATION_VECTOR.
+// Head orientation (phone in the headset, in landscape) from TYPE_GAME_ROTATION_VECTOR.
 //
-// Mundo: Z para cima, a direção do olhar na hora do recentramento vira +Y ("frente").
-// Espaço do olho: X para a direita, Y para cima, olhando para -Z (convenção do OpenGL).
+// World: Z up, the gaze direction at the moment of recentering becomes +Y ("forward").
+// Eye space: X to the right, Y up, looking toward -Z (OpenGL convention).
 //
-// O sensor chega a ~200 Hz, mas a tela só precisa da leitura mais recente uma vez por desenho:
-// o callback só copia o vetor e as matrizes são calculadas em getWorldToEye(), na thread GL.
+// The sensor arrives at ~200 Hz, but the screen only needs the most recent reading once per draw:
+// the callback only copies the vector and the matrices are computed in getWorldToEye(), on the GL thread.
 //
-// Diagnóstico (VrLog, linha SENSOR[rótulo] uma vez por segundo): eventos/s do sensor, maior intervalo entre eventos,
-// idade da amostra no momento da leitura (quanto o olhar está atrasado em relação ao sensor) e quantas leituras
-// repetiram a amostra anterior (quem lê mais rápido que o sensor recebe passo zero e depois passo dobrado).
+// Diagnostics (VrLog, SENSOR[label] line once per second): sensor events/s, largest gap between events,
+// age of the sample at read time (how far the gaze lags behind the sensor) and how many reads
+// repeated the previous sample (a reader faster than the sensor gets a zero step and then a doubled step).
 public class HeadTracker implements SensorEventListener {
     private static final long LOG_WINDOW_NS = 1_000_000_000L;
 
@@ -41,7 +41,7 @@ public class HeadTracker implements SensorEventListener {
     private boolean hasRaw;
     private boolean recenterRequested = true;
 
-    // Estatísticas (sob `lock`)
+    // Statistics (under `lock`)
     private long sampleSeq, readSeq;
     private long lastEventNs, prevEventNs;
     private boolean lastReadFresh = true;
@@ -50,7 +50,7 @@ public class HeadTracker implements SensorEventListener {
     private long winReads, winStale, winAgeSumNs, winAgeMaxNs;
     private int accuracy = -1;
 
-    // Só usados em getWorldToEye(), sempre da mesma thread
+    // Only used in getWorldToEye(), always from the same thread
     private final float[] vector = new float[5];
     private final float[] rotationRow = new float[16];
     private final float[] remappedRow = new float[16];
@@ -63,7 +63,7 @@ public class HeadTracker implements SensorEventListener {
         this(context, "GL");
     }
 
-    // `label` diz de quem é a linha de log (cada dono registra o seu sensor): MOUSE, LADO, GL
+    // `label` says whose log line it is (each owner logs its own sensor): MOUSE, STRAFE, GL
     public HeadTracker(Context context, String label) {
         this.context = context;
         this.label = label;
@@ -87,11 +87,11 @@ public class HeadTracker implements SensorEventListener {
         }
         boolean ok = sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_FASTEST,
                 new Handler(thread.getLooper()));
-        // Sem HIGH_SAMPLING_RATE_SENSORS (Android 12+) o sistema limita a 200 Hz; o log mostra se o limite pega
+        // Without HIGH_SAMPLING_RATE_SENSORS (Android 12+) the system caps at 200 Hz; the log shows whether the cap applies
         boolean highRate = Build.VERSION.SDK_INT < 31
                 || context.checkSelfPermission("android.permission.HIGH_SAMPLING_RATE_SENSORS")
                 == android.content.pm.PackageManager.PERMISSION_GRANTED;
-        VrLog.i("SENSOR", "[%s] iniciado ok=%b nome=\"%s\" atraso_min=%dus atraso_max=%dus fifo=%d alta_taxa=%b",
+        VrLog.i("SENSOR", "[%s] started ok=%b name=\"%s\" delay_min=%dus delay_max=%dus fifo=%d high_rate=%b",
                 label, ok, sensor.getName(), sensor.getMinDelay(), sensor.getMaxDelay(),
                 sensor.getFifoMaxEventCount(), highRate);
         return ok;
@@ -109,35 +109,35 @@ public class HeadTracker implements SensorEventListener {
         }
     }
 
-    // O próximo desenho vira a "frente"
+    // The next draw becomes the "forward"
     public void recenter() {
         synchronized (lock) {
             recenterRequested = true;
         }
-        VrLog.i("SENSOR", "[%s] recentrar pedido", label);
+        VrLog.i("SENSOR", "[%s] recenter requested", label);
     }
 
-    // Chamado na thread do sensor a cada amostra nova (para quem quer reagir ao sensor em vez de sondar por tempo)
+    // Called on the sensor thread for each new sample (for callers that want to react to the sensor instead of polling on a timer)
     public void setSampleListener(Runnable listener) {
         sampleListener = listener;
     }
 
-    // A última leitura de getWorldToEye() trouxe uma amostra nova do sensor? (mesma thread de getWorldToEye)
+    // Did the last getWorldToEye() read bring a new sensor sample? (same thread as getWorldToEye)
     public boolean lastReadFresh() {
         synchronized (lock) {
             return lastReadFresh;
         }
     }
 
-    // Idade da amostra usada na última leitura, em ns (mesma thread de getWorldToEye)
+    // Age of the sample used in the last read, in ns (same thread as getWorldToEye)
     public long lastReadAgeNs() {
         synchronized (lock) {
             return lastReadAgeNs;
         }
     }
 
-    // Preenche a matriz mundo->olho (16 floats, column-major, só rotação) com a leitura mais recente.
-    // false se ainda não há leitura. Chamar sempre da mesma thread (a thread GL).
+    // Fills the world->eye matrix (16 floats, column-major, rotation only) with the most recent reading.
+    // false if there is no reading yet. Always call from the same thread (the GL thread).
     public boolean getWorldToEye(float[] out) {
         boolean recenterNow;
         synchronized (lock) {
@@ -159,7 +159,7 @@ public class HeadTracker implements SensorEventListener {
 
         SensorManager.getRotationMatrixFromVector(rotationRow, vector);
 
-        // Eixos do aparelho -> eixos da tela na rotação atual (o óculos usa paisagem)
+        // Device axes -> screen axes at the current rotation (the headset uses landscape)
         int axisX, axisY;
         switch (windowManager.getDefaultDisplay().getRotation()) {
             case Surface.ROTATION_90:
@@ -181,15 +181,15 @@ public class HeadTracker implements SensorEventListener {
         }
         SensorManager.remapCoordinateSystem(rotationRow, axisX, axisY, remappedRow);
 
-        // O SensorManager entrega row-major; android.opengl.Matrix é column-major
+        // SensorManager delivers row-major; android.opengl.Matrix is column-major
         Matrix.transposeM(rotationCol, 0, remappedRow, 0);
 
         if (recenterNow) {
-            // Olhar no mundo = R * (0, 0, -1) = -(terceira coluna)
+            // Gaze in the world = R * (0, 0, -1) = -(third column)
             yaw = (float) Math.atan2(-rotationCol[8], -rotationCol[9]);
         }
 
-        // Gira o mundo em torno de Z para o olhar inicial apontar para +Y
+        // Rotate the world around Z so the initial gaze points toward +Y
         Matrix.setRotateM(yawFix, 0, (float) Math.toDegrees(yaw), 0, 0, 1);
         Matrix.multiplyMM(eyeToWorld, 0, yawFix, 0, rotationCol, 0);
         Matrix.transposeM(out, 0, eyeToWorld, 0);
@@ -237,17 +237,17 @@ public class HeadTracker implements SensorEventListener {
         if (!logNow) {
             return;
         }
-        VrLog.i("SENSOR", "[%s] eventos=%.0f/s gap_max=%.1fms leituras=%d repetidas=%d idade_med=%.2fms idade_max=%.2fms precisao=%d",
+        VrLog.i("SENSOR", "[%s] events=%.0f/s gap_max=%.1fms reads=%d repeated=%d age_avg=%.2fms age_max=%.2fms accuracy=%d",
                 label, events * 1e9 / windowNs, maxGap / 1e6, reads, stale,
                 reads > 0 ? ageSum / 1e6 / reads : 0.0, ageMax / 1e6, acc);
     }
 
-    // Precisão baixa do sensor (0-1) significa deriva: a câmera anda sozinha
+    // Low sensor accuracy (0-1) means drift: the camera moves on its own
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
         synchronized (lock) {
             this.accuracy = accuracy;
         }
-        VrLog.w("SENSOR", "[%s] precisao mudou para %d (0=inutilizavel 1=baixa 2=media 3=alta)", label, accuracy);
+        VrLog.w("SENSOR", "[%s] accuracy changed to %d (0=unusable 1=low 2=medium 3=high)", label, accuracy);
     }
 }

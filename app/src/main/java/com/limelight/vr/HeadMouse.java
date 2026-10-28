@@ -7,39 +7,39 @@ import android.os.Process;
 
 import com.limelight.nvstream.NvConnection;
 
-// Cabeça = câmera: transforma a rotação da cabeça (yaw/pitch do olhar) em movimento relativo de mouse.
+// Head = camera: turns the head rotation (gaze yaw/pitch) into relative mouse movement.
 //
-// Usa a mesma orientação do HeadTracker, mas só os deltas entre leituras; o recentramento do
-// HeadTracker (rotação em torno de Z) não altera yaw/pitch relativos. Girar para a direita move o mouse
-// para a direita; olhar para cima move o mouse para cima (y positivo é para baixo).
+// Uses the same orientation as HeadTracker, but only the deltas between readings; HeadTracker's
+// recentering (rotation around Z) does not change the relative yaw/pitch. Turning right moves the mouse
+// right; looking up moves the mouse up (positive y is down).
 //
-// A matemática (giro na borda contínuo ou em passos, zona morta vertical ao andar, congelar o yaw olhando reto para
-// cima/baixo) está em HeadMotion, sem Android. Aqui ficam o sensor, a thread, o envio e o log.
+// The math (continuous or stepped edge turn, vertical deadzone while walking, freezing the yaw when looking straight
+// up/down) is in HeadMotion, without Android. The sensor, the thread, sending and logging live here.
 //
-// Ritmo: por padrão um tick a cada 4 ms (~250 Hz, acima do sensor de ~200 Hz, então ~13% dos ticks releem a mesma
-// amostra). Com `syncToSensor` não há tick: cada amostra nova do sensor dispara um poll, sem leitura repetida.
+// Pace: by default one tick every 4 ms (~250 Hz, above the ~200 Hz sensor, so ~13% of ticks re-read the same
+// sample). With `syncToSensor` there is no tick: each new sensor sample triggers a poll, with no repeated reading.
 //
-// Diagnóstico (VrLog, linha HM uma vez por segundo + eventos): os contadores ficam só na thread do tick; nada é
-// impresso por tick. Campos da linha HM:
-//   ticks / periodo_max / atrasados   ritmo do laço de 4 ms (atrasado = mais de 8 ms desde o tick anterior)
-//   sem_amostra / idade_max           ticks que releram a mesma amostra do sensor; idade da amostra mais velha usada
-//   enviados / soma / max / uns       pacotes de mouse; soma e maior |contagem| em x,y por pacote; pacotes de 1 contagem
-//   inversoes                         trocas de sinal do x entre pacotes seguidos (tremor)
-//   pulos                             ticks com giro maior que 3° (salto do sensor ou tick muito atrasado)
-//   zona / clamp                      giros descartados pela zona morta; pacotes cortados em 16 bits
-//   percorrido                        graus de yaw,pitch realmente percorridos (soma/percorrido = contagens por grau)
-//   envio_med / envio_max             tempo dentro de sendMouseMove
-//   borda / andando / banda           ms com giro na borda, ms andando, graus de pitch engolidos pela zona morta vertical
+// Diagnostics (VrLog, HM line once per second + events): the counters live only on the tick thread; nothing is
+// printed per tick. Fields of the HM line:
+//   ticks / period_max / late         pace of the 4 ms loop (late = more than 8 ms since the previous tick)
+//   stale / age_max                   ticks that re-read the same sensor sample; age of the oldest sample used
+//   sent / sum / max / ones           mouse packets; sum and largest |count| in x,y per packet; 1-count packets
+//   flips                             x sign changes between consecutive packets (jitter)
+//   jumps                             ticks with a turn larger than 3° (sensor jump or a very late tick)
+//   deadzone / clamp                  turns discarded by the deadzone; packets clipped to 16 bits
+//   path                              degrees of yaw,pitch actually traveled (sum/path = counts per degree)
+//   send_avg / send_max               time spent inside sendMouseMove
+//   edge / walking / band             ms with edge turn, ms walking, degrees of pitch swallowed by the vertical deadzone
 public class HeadMouse {
     public interface WalkSource {
         boolean isWalking();
     }
 
-    private static final long PERIOD_MS = 4; // ~250 Hz, acima do sensor (~200 Hz)
+    private static final long PERIOD_MS = 4; // ~250 Hz, above the sensor (~200 Hz)
 
     private static final long LOG_WINDOW_NS = 1_000_000_000L;
     private static final long LATE_TICK_NS = 2 * PERIOD_MS * 1_000_000L;
-    private static final int VERBOSE_SPIKE_LIMIT = 10; // linhas de pico por segundo no modo verbose
+    private static final int VERBOSE_SPIKE_LIMIT = 10; // spike lines per second in verbose mode
 
     private final HeadTracker tracker;
     private final NvConnection conn;
@@ -55,7 +55,7 @@ public class HeadMouse {
 
     private final float[] worldToEye = new float[16];
 
-    // Diagnóstico, só na thread do poll
+    // Diagnostics, poll thread only
     private long winStartNs, lastPollNs;
     private int sTicks, sLate, sStale, sPaused, sSent, sOnes, sFlips, sJumps, sDeadzone, sClamp, sGimbal, sSpikeLogs;
     private long sMaxPeriodNs, sAgeMaxNs, sSendSumNs, sSendMaxNs, sEdgeNs, sWalkNs;
@@ -67,8 +67,8 @@ public class HeadMouse {
     private boolean pausedByClutch;
     private boolean inEdge;
 
-    // Só para testes por broadcast: soma um desvio fixo e uma oscilação de pitch à leitura do sensor e pode fingir que anda.
-    // Zerar os desvios recentra (senão o centro do giro na borda fica no desvio antigo e o mouse anda sozinho).
+    // Broadcast tests only: adds a fixed offset and a pitch oscillation to the sensor reading and can pretend to walk.
+    // Zeroing the offsets recenters (otherwise the edge-turn center stays at the old offset and the mouse moves on its own).
     private volatile float testYaw, testPitch, testBobAmp, testBobHz;
     private volatile boolean testWalking;
     private volatile boolean testChanged;
@@ -103,12 +103,12 @@ public class HeadMouse {
         motion.edgeDeg = edgeDeg;
     }
 
-    // Com o giro na borda ligado, vira em passos fixos em vez de contínuo
+    // With the edge turn on, it turns in fixed steps instead of continuously
     public void setSnapTurn(boolean snap) {
         motion.snapTurn = snap;
     }
 
-    // Um poll a cada amostra do sensor, em vez de um tick de 4 ms (chamar antes de start())
+    // One poll per sensor sample, instead of a 4 ms tick (call before start())
     public void setSyncToSensor(boolean sync) {
         syncToSensor = sync;
     }
@@ -148,7 +148,7 @@ public class HeadMouse {
 
     public void stop() {
         running = false;
-        VrLog.i("HM", "parou");
+        VrLog.i("HM", "stopped");
         tracker.setSampleListener(null);
         tracker.stop();
         if (thread != null) {
@@ -157,26 +157,26 @@ public class HeadMouse {
         }
     }
 
-    // Define a pausa de forma explícita (idempotente), para quem precisa garantir o estado (a suíte de testes no Deck)
+    // Sets the pause explicitly (idempotent), for callers that need to guarantee the state (the test suite on the Deck)
     public void setPaused(boolean paused) {
         toggledPause = paused;
-        VrLog.i("VOL", "pausa %s (definida)", paused ? "ligada" : "desligada");
-        VrTrace.volume(paused ? "pausa_liga" : "pausa_desliga");
+        VrLog.i("VOL", "pause %s (set)", paused ? "on" : "off");
+        VrTrace.volume(paused ? "pause_on" : "pause_off");
     }
 
-    // Liga/desliga o envio; ao voltar, o movimento parte da pose atual (sem pulo)
+    // Turns sending on/off; on return, the movement starts from the current pose (no jump)
     public boolean togglePause() {
         toggledPause = !toggledPause;
-        VrLog.i("VOL", "pausa %s", toggledPause ? "ligada" : "desligada");
-        VrTrace.volume(toggledPause ? "pausa_liga" : "pausa_desliga");
+        VrLog.i("VOL", "pause %s", toggledPause ? "on" : "off");
+        VrTrace.volume(toggledPause ? "pause_on" : "pause_off");
         return toggledPause;
     }
 
-    // Embreagem: enquanto segurada, a cabeça gira sem mexer a câmera (como levantar o mouse da mesa)
+    // Clutch: while held, the head turns without moving the camera (like lifting the mouse off the desk)
     public void setClutch(boolean held) {
         if (clutch != held) {
-            VrLog.i("VOL", "embreagem %s", held ? "segurada" : "solta");
-            VrTrace.volume(held ? "embreagem_liga" : "embreagem_solta");
+            VrLog.i("VOL", "clutch %s", held ? "held" : "released");
+            VrTrace.volume(held ? "clutch_on" : "clutch_off");
         }
         clutch = held;
     }
@@ -192,7 +192,7 @@ public class HeadMouse {
         if (!tracker.lastReadFresh()) sStale++;
         sAgeMaxNs = Math.max(sAgeMaxNs, tracker.lastReadAgeNs());
 
-        // Olhar no mundo = -(terceira coluna de eyeToWorld) = -(terceira linha de worldToEye)
+        // Gaze in the world = -(third column of eyeToWorld) = -(third row of worldToEye)
         float gx = -worldToEye[2];
         float gy = -worldToEye[6];
         float gz = -worldToEye[10];
@@ -213,7 +213,7 @@ public class HeadMouse {
                 pausedPitch = pitch;
                 pausedByClutch = clutch;
                 motion.endEdge(nowNs);
-                logEdge(nowNs, "pausa");
+                logEdge(nowNs, "pause");
             }
             motion.invalidate();
             sPaused++;
@@ -221,9 +221,9 @@ public class HeadMouse {
             return;
         }
         if (pausedSinceNs != 0) {
-            // A câmera retoma da pose atual, sem pulo: o giro feito durante a pausa é o que "levantar o mouse" reposicionou
-            VrLog.i("HM", "retomou motivo=%s pausa=%.1fs giro_na_pausa yaw=%+.1f pitch=%+.1f graus",
-                    pausedByClutch ? "embreagem" : "pausa", (nowNs - pausedSinceNs) / 1e9,
+            // The camera resumes from the current pose, with no jump: the turn made during the pause is what "lifting the mouse" repositioned
+            VrLog.i("HM", "resumed reason=%s pause=%.1fs turn_during_pause yaw=%+.1f pitch=%+.1f deg",
+                    pausedByClutch ? "clutch" : "pause", (nowNs - pausedSinceNs) / 1e9,
                     HeadMotion.wrap(yaw - pausedYaw), pitch - pausedPitch);
             pausedSinceNs = 0;
         }
@@ -233,41 +233,41 @@ public class HeadMouse {
         }
 
         yaw += testYaw;
-        // Teste por broadcast com o celular deitado: o yaw congelaria (olhar reto para baixo); finge olhar na horizontal
+        // Broadcast test with the phone lying flat: the yaw would freeze (gaze straight down); pretend to look horizontally
         if (testYaw != 0 || testPitch != 0 || testBobAmp != 0) horizLen = 1f;
         pitch += testPitch + testBobAmp * (float) Math.sin(2 * Math.PI * testBobHz * nowNs / 1e9);
 
         WalkSource source = walkSource;
         boolean walking = testWalking || (source != null && source.isWalking());
         if (!motion.update(yaw, pitch, horizLen, nowNs, walking)) {
-            logEdge(nowNs, "recentrou");
+            logEdge(nowNs, "recentered");
             if (motion.walkEvent == HeadMotion.EVENT_ENDED) {
-                VrLog.i("HM", "andando fim (recentrou) duracao=%.1fs pitch_engolido=%.1f graus", motion.eventSeconds, motion.eventAbsorbed);
+                VrLog.i("HM", "walking end (recentered) duration=%.1fs pitch_swallowed=%.1f deg", motion.eventSeconds, motion.eventAbsorbed);
             }
-            VrLog.i("HM", "centro yaw=%+.1f pitch=%+.1f", yaw, pitch);
+            VrLog.i("HM", "center yaw=%+.1f pitch=%+.1f", yaw, pitch);
             logWindow(nowNs);
             return;
         }
 
         if (motion.jump) {
             sJumps++;
-            spike("pulo giro yaw=%+.2f pitch=%+.2f em %.1fms idade=%.1fms", motion.rawDYaw, motion.rawDPitch,
+            spike("jump turn yaw=%+.2f pitch=%+.2f in %.1fms age=%.1fms", motion.rawDYaw, motion.rawDPitch,
                     motion.dtNs / 1e6, tracker.lastReadAgeNs() / 1e6);
         }
         if (motion.gimbalFrozen) sGimbal++;
         if (motion.walkEvent == HeadMotion.EVENT_ENDED) {
-            VrLog.i("HM", "andando fim duracao=%.1fs pitch_engolido=%.1f graus banda=%.1f",
+            VrLog.i("HM", "walking end duration=%.1fs pitch_swallowed=%.1f deg band=%.1f",
                     motion.eventSeconds, motion.eventAbsorbed, motion.walkPitchBandDeg);
         }
         sBandAbsorbed += motion.absorbedPitch;
         if (motion.walkPitchBandDeg > 0 && walking) sWalkNs += motion.dtNs;
         if (motion.edgeEvent == HeadMotion.EVENT_STARTED) {
             inEdge = true;
-            VrLog.i("HM", "borda entrou rel=%+.1f limite=%.0f graus modo=%s", motion.eventRel, motion.edgeDeg,
-                    motion.snapTurn ? "passos" : "continuo");
+            VrLog.i("HM", "edge entered rel=%+.1f limit=%.0f deg mode=%s", motion.eventRel, motion.edgeDeg,
+                    motion.snapTurn ? "steps" : "continuous");
         }
         else {
-            logEdge(nowNs, "voltou");
+            logEdge(nowNs, "returned");
         }
         if (inEdge) sEdgeNs += motion.dtNs;
 
@@ -298,22 +298,22 @@ public class HeadMouse {
                 lastSignX = sign;
             }
             if (ax > 60 || ay > 60) {
-                spike("passo grande mouse=%d,%d idade=%.1fms", mx, my, tracker.lastReadAgeNs() / 1e6);
+                spike("big step mouse=%d,%d age=%.1fms", mx, my, tracker.lastReadAgeNs() / 1e6);
             }
         }
         logWindow(nowNs);
     }
 
-    // Registra o fim do giro da borda (depois de motion.update() ou motion.endEdge())
+    // Logs the end of the edge turn (after motion.update() or motion.endEdge())
     private void logEdge(long nowNs, String why) {
         if (motion.edgeEvent == HeadMotion.EVENT_ENDED) {
             inEdge = false;
-            VrLog.i("HM", "borda saiu (%s) duracao=%.1fs girou=%.0f graus", why, motion.eventSeconds, motion.eventTurned);
+            VrLog.i("HM", "edge left (%s) duration=%.1fs turned=%.0f deg", why, motion.eventSeconds, motion.eventTurned);
             motion.edgeEvent = HeadMotion.EVENT_NONE;
         }
     }
 
-    // Período entre polls seguidos: no modo por tempo devia ficar perto de 4 ms; no sincronizado, perto de 5 ms (200 Hz)
+    // Period between consecutive polls: in timed mode it should stay near 4 ms; in synchronized mode, near 5 ms (200 Hz)
     private void countTick(long nowNs) {
         sTicks++;
         if (lastPollNs != 0) {
@@ -321,13 +321,13 @@ public class HeadMouse {
             sMaxPeriodNs = Math.max(sMaxPeriodNs, period);
             if (period > LATE_TICK_NS) {
                 sLate++;
-                spike("tick atrasado periodo=%.1fms", period / 1e6);
+                spike("late tick period=%.1fms", period / 1e6);
             }
         }
         lastPollNs = nowNs;
     }
 
-    // Picos isolados só no modo verbose, no máximo VERBOSE_SPIKE_LIMIT por segundo
+    // Isolated spikes only in verbose mode, at most VERBOSE_SPIKE_LIMIT per second
     private void spike(String format, Object... args) {
         if (VrLog.verbose() && sSpikeLogs < VERBOSE_SPIKE_LIMIT) {
             sSpikeLogs++;
@@ -344,9 +344,9 @@ public class HeadMouse {
         if (span < LOG_WINDOW_NS) {
             return;
         }
-        VrLog.i("HM", "ticks=%d periodo_max=%.1fms atrasados=%d sem_amostra=%d idade_max=%.1fms enviados=%d pausados=%d "
-                        + "soma=%d,%d max=%d,%d uns=%d inversoes=%d pulos=%d zona=%d clamp=%d percorrido=%.1f,%.1f "
-                        + "envio_med=%.3fms envio_max=%.2fms borda=%d andando=%d banda=%.2f congelado=%d sync=%b",
+        VrLog.i("HM", "ticks=%d period_max=%.1fms late=%d stale=%d age_max=%.1fms sent=%d paused=%d "
+                        + "sum=%d,%d max=%d,%d ones=%d flips=%d jumps=%d deadzone=%d clamp=%d path=%.1f,%.1f "
+                        + "send_avg=%.3fms send_max=%.2fms edge=%d walking=%d band=%.2f frozen=%d sync=%b",
                 sTicks, sMaxPeriodNs / 1e6, sLate, sStale, sAgeMaxNs / 1e6, sSent, sPaused,
                 sSumX, sSumY, sMaxX, sMaxY, sOnes, sFlips, sJumps, sDeadzone, sClamp, sYawPath, sPitchPath,
                 sSent > 0 ? sSendSumNs / 1e6 / sSent : 0.0, sSendMaxNs / 1e6,

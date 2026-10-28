@@ -1,19 +1,19 @@
 package com.limelight.vr;
 
-// Andar de verdade pelo ARCore como analógico (esquerdo) de um controle, para jogos que só aceitam analógico (sem WASD):
-// a direção e a intensidade vêm da velocidade nos últimos `windowNs` (sem Android, testável na JVM).
+// Real walking through ARCore as a controller's (left) analog stick, for games that only accept an analog stick (no WASD):
+// direction and intensity come from the speed over the last `windowNs` (no Android, testable on the JVM).
 //
-// - Zona morta: movimento na janela abaixo de `deadzoneM` não mexe o analógico (balanço do corpo, tremor do rastreamento).
-// - Acima dela, a intensidade sobe linear até 1 em `fullM` metros na janela (padrão: 4x a zona morta, ~0,8 m/s).
-// - Multidirecional: o vetor (lado, frente) mantém o ângulo; um passo na diagonal vira uma diagonal no analógico.
-// - Suavização leve (sobe e desce em ~3 quadros) para o analógico não tremer; parar solta rápido.
-// - Salto de pose (ver ArMotionKeys.JUMP_M) apaga o histórico e zera o analógico.
+// - Deadzone: movement in the window below `deadzoneM` does not move the stick (body sway, tracking jitter).
+// - Above it, the intensity rises linearly to 1 at `fullM` meters in the window (default: 4x the deadzone, ~0.8 m/s).
+// - Multidirectional: the (side, forward) vector keeps its angle; a diagonal step becomes a diagonal on the stick.
+// - Light smoothing (rises and falls in ~3 frames) so the stick does not jitter; stopping releases quickly.
+// - A pose jump (see ArMotionKeys.JUMP_M) clears the history and zeroes the stick.
 //
-// `forward` positivo = frente, `side` positivo = direita. Saída: x (direita +) e y (frente +), cada um em [-1, 1].
+// Positive `forward` = ahead, positive `side` = right. Output: x (right +) and y (forward +), each in [-1, 1].
 public class ArMotionStick {
     private static final int CAPACITY = 128;
-    private static final float SMOOTH_UP = 0.5f;   // fração do caminho percorrida por quadro ao subir
-    private static final float SMOOTH_DOWN = 0.7f; // ao descer (parar tem que ser rápido)
+    private static final float SMOOTH_UP = 0.5f;   // fraction of the way covered per frame when rising
+    private static final float SMOOTH_DOWN = 0.7f; // when falling (stopping has to be fast)
 
     private final float deadzone;
     private final float full;
@@ -24,8 +24,8 @@ public class ArMotionStick {
     private final float[] sides = new float[CAPACITY];
     private int head, size;
 
-    public float x, y;          // analógico (já suavizado)
-    public float magnitude;     // |(x, y)| de 0 a 1
+    public float x, y;          // analog stick (already smoothed)
+    public float magnitude;     // |(x, y)| from 0 to 1
     public boolean jumped;
     public float lastForwardDelta, lastSideDelta;
 
@@ -79,7 +79,7 @@ public class ArMotionStick {
     }
 
     private static float smooth(float current, float target) {
-        // Descer = o módulo diminui (ou troca de sinal): segue mais rápido que ao subir
+        // Falling = the magnitude decreases (or the sign flips): follows faster than when rising
         float k = Math.abs(target) < Math.abs(current) ? SMOOTH_DOWN : SMOOTH_UP;
         return current + (target - current) * k;
     }

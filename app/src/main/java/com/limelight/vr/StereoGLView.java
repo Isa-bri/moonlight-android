@@ -21,17 +21,17 @@ import java.nio.FloatBuffer;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
-// Modo VR: o MediaCodec decodifica para um SurfaceTexture (textura OES) e esta view desenha a
-// mesma textura duas vezes, uma em cada metade da tela (olho esquerdo/direito).
+// VR mode: MediaCodec decodes into a SurfaceTexture (OES texture) and this view draws the
+// same texture twice, one in each half of the screen (left/right eye).
 //
-// - Sem headTracking (etapa 2): o vídeo ocupa o maior retângulo com a proporção original em cada metade.
-// - Com headTracking (etapa 3, "cinema"): o vídeo é uma tela virtual fixa no mundo, a uma distância fixa,
-//   e o giroscópio (HeadTracker) move a câmera. Ainda sem distorção de lente.
+// - Without headTracking (step 2): the video takes the largest rectangle with the original aspect ratio in each half.
+// - With headTracking (step 3, "cinema"): the video is a virtual screen fixed in the world, at a fixed distance,
+//   and the gyroscope (HeadTracker) moves the camera. Still without lens distortion.
 public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Renderer,
         SurfaceTexture.OnFrameAvailableListener {
 
     public interface SurfaceListener {
-        // Chamado na thread GL assim que a Surface do decodificador existe
+        // Called on the GL thread as soon as the decoder Surface exists
         void onVideoSurfaceReady(Surface surface);
     }
 
@@ -54,8 +54,8 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
             "  gl_FragColor = texture2D(uTex, vTex);\n" +
             "}\n";
 
-    // Passe de distorção: lê a cena do olho (textura 2D) e a deforma em "barril" para cancelar a
-    // almofada das lentes. s = p * (1 + k1 r^2), com p em [-1, 1] centrado na lente
+    // Distortion pass: reads the eye scene (2D texture) and warps it into a "barrel" to cancel the
+    // lens pincushion. s = p * (1 + k1 r^2), with p in [-1, 1] centered on the lens
     private static final String DIST_VERTEX_SHADER =
             "attribute vec2 aPos;\n" +
             "varying vec2 vPos;\n" +
@@ -70,7 +70,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
             "uniform float uK1;\n" +
             "uniform float uCa;\n" +
             "varying vec2 vPos;\n" +
-            "// Uma cor por vez: a lente refrata cada comprimento de onda um pouco diferente\n" +
+            "// One color at a time: the lens refracts each wavelength a bit differently\n" +
             "vec3 sampleAt(float k, float r2, float channel) {\n" +
             "  vec2 s = vPos * (1.0 + k * r2) * 0.5 + 0.5;\n" +
             "  if (s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0) {\n" +
@@ -86,9 +86,9 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
     private static final float[] QUAD = {-1, -1, 1, -1, -1, 1, 1, 1};
 
-    // Campo de visão vertical por olho e distância entre os olhos (valores provisórios até a etapa 4).
-    // 80 graus: com lentes de 40 mm e ~45 mm de distância focal (suposição para o Shinecon G13), a
-    // metade da tela do S23 Ultra (~78 x 73 mm) cobre cerca de 80 x 79 graus
+    // Vertical field of view per eye and distance between the eyes (provisional values until step 4).
+    // 80 degrees: with 40 mm lenses and ~45 mm focal length (an assumption for the Shinecon G13), half of
+    // the S23 Ultra screen (~78 x 73 mm) covers about 80 x 79 degrees
     private static final float FOV_Y_DEGREES = 80.0f;
 
     private final int videoWidth;
@@ -97,7 +97,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
     private final boolean headTracking;
     private final float lensK1;
     private final float chromatic;
-    private final float ipd; // metros
+    private final float ipd; // meters
     private final float pixelsPerMeter;
     private final HeadTracker headTracker;
     private final SurfaceListener listener;
@@ -131,8 +131,8 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
     private int viewHeight;
     private volatile boolean frameAvailable;
 
-    // Latência extra do caminho GL: do onFrameAvailable até o fim do desenho (com glFinish,
-    // só quando measureLatency). Não inclui o swap/composição nem o tempo até os fótons.
+    // Extra latency of the GL path: from onFrameAvailable to the end of drawing (with glFinish,
+    // only when measureLatency). It does not include the swap/compositing nor the time until the photons.
     private volatile long frameAvailableNs;
     private long statsStartNs;
     private int statsFrames;
@@ -142,13 +142,13 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
     private long statsMaxGapNs;
     private int statsSlowGaps;
 
-    // Teste de latência do mouse (debug): lê 1 pixel do centro do olho esquerdo a cada quadro novo e
-    // registra o instante em que a luminância muda (o host pisca a tela quando o mouse mexe)
+    // Mouse latency test (debug): reads 1 pixel from the center of the left eye on every new frame and
+    // records the instant the luminance changes (the host flashes the screen when the mouse moves)
     private volatile boolean probe;
     private final java.nio.ByteBuffer probePixel = java.nio.ByteBuffer.allocateDirect(4);
     private int probeLuma = -1;
 
-    // screenDistance e screenHeight (metros) definem a tela virtual do modo cinema; a largura vem da proporção do vídeo
+    // screenDistance and screenHeight (meters) define the virtual screen of cinema mode; the width comes from the video aspect ratio
     public StereoGLView(Context context, int videoWidth, int videoHeight, boolean measureLatency,
                         boolean headTracking, float screenDistance, float screenHeight, float lensK1, float chromatic, float ipd, SurfaceListener listener) {
         super(context);
@@ -163,7 +163,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
 
         Matrix.setIdentityM(identity, 0);
 
-        // Quad (x, y) em [-1, 1] -> plano vertical a screenDistance à frente (+Y), centrado na altura dos olhos
+        // Quad (x, y) in [-1, 1] -> vertical plane screenDistance ahead (+Y), centered at eye height
         float halfWidth = screenHeight * videoWidth / videoHeight / 2;
         float halfHeight = screenHeight / 2;
         System.arraycopy(new float[] {
@@ -179,13 +179,13 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         quad = ByteBuffer.allocateDirect(QUAD.length * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         quad.put(QUAD).position(0);
 
-        // Toques e foco continuam indo para o StreamView que fica por baixo
+        // Touches and focus keep going to the StreamView underneath
         setClickable(false);
         setFocusable(false);
 
         setEGLContextClientVersion(2);
         setRenderer(this);
-        // Desenha quando chega um quadro de vídeo e, com head tracking, também a cada vsync (ver startVsync)
+        // Draws when a video frame arrives and, with head tracking, also on every vsync (see startVsync)
         setRenderMode(RENDERMODE_WHEN_DIRTY);
     }
 
@@ -197,7 +197,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
                 startVsync();
             }
             else {
-                VrLog.w("GL:", "Sem TYPE_GAME_ROTATION_VECTOR neste aparelho; usando a tela fixa");
+                VrLog.w("GL:", "No TYPE_GAME_ROTATION_VECTOR on this device; using the fixed screen");
             }
         }
     }
@@ -209,8 +209,8 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         super.onDetachedFromWindow();
     }
 
-    // Um pedido de desenho por vsync, para a cabeça se mover mesmo entre quadros de vídeo. Roda numa
-    // thread própria (cada Looper tem o seu Choreographer) para não depender da thread principal.
+    // One draw request per vsync, so the head moves even between video frames. Runs on its own
+    // thread (each Looper has its own Choreographer) so it does not depend on the main thread.
     private HandlerThread vsyncThread;
     private volatile boolean vsyncRunning;
 
@@ -240,16 +240,16 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         }
     }
 
-    // Recentra a tela virtual na direção atual do olhar
+    // Recenters the virtual screen on the current gaze direction
     public void recenter() {
         headTracker.recenter();
     }
 
     @Override
     public void onSurfaceCreated(GL10 unused, EGLConfig config) {
-        // Troca assíncrona: o quadro novo substitui o que ainda não foi exibido, então não se forma
-        // fila de buffers à frente do vsync (cada desenho entra na tela no vsync seguinte) e o
-        // eglSwapBuffers não bloqueia a thread GL
+        // Asynchronous swap: the new frame replaces the one not yet shown, so no buffer queue
+        // builds up ahead of vsync (each draw reaches the screen on the next vsync) and
+        // eglSwapBuffers does not block the GL thread
         EGL14.eglSwapInterval(EGL14.eglGetCurrentDisplay(), 0);
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
 
@@ -276,7 +276,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
 
-        // A textura (e a Surface) é recriada se o contexto GL for perdido
+        // The texture (and the Surface) is recreated if the GL context is lost
         if (videoSurface != null) {
             videoSurface.release();
             surfaceTexture.release();
@@ -314,8 +314,8 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         GLES20.glClearColor(0, 0, 0, 1);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
-        // O centro de cada olho fica a ±IPD/2 do centro da tela (as lentes do óculos são ajustadas
-        // para a IPD); a largura da imagem é limitada para não cruzar a metade da tela
+        // The center of each eye sits ±IPD/2 from the screen center (the headset lenses are adjusted
+        // to the IPD); the image width is limited so it does not cross the half of the screen
         int offset = Math.round(ipd * pixelsPerMeter / 2);
         int eyeWidth = Math.max(1, Math.min(viewWidth / 2, 2 * Math.min(viewWidth / 2 - offset, offset)));
         boolean tracked = headTracking && headTracker.getWorldToEye(worldToEye);
@@ -328,7 +328,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
             int centerX = viewWidth / 2 + (eye == 0 ? -offset : offset);
             int x = centerX - eyeWidth / 2;
             if (distort) {
-                // Cena do olho na textura; depois ela é deformada para a região do olho
+                // Eye scene into the texture; then it is warped into the eye region
                 GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
                 GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
@@ -350,19 +350,19 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
             GLES20.glReadPixels(viewWidth / 2 - offset, viewHeight / 2, 1, 1, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, probePixel);
             int luma = ((probePixel.get(0) & 0xFF) + (probePixel.get(1) & 0xFF) + (probePixel.get(2) & 0xFF)) / 3;
             if (probeLuma >= 0 && Math.abs(luma - probeLuma) > 60) {
-                Log.i("DeckVR", "PROBE mudou " + probeLuma + "->" + luma + " t=" + System.nanoTime());
+                Log.i("DeckVR", "PROBE changed " + probeLuma + "->" + luma + " t=" + System.nanoTime());
             }
             probeLuma = luma;
         }
 
-        // Só mede desenhos que consumiram um quadro novo (não os de rotação/redimensionamento)
+        // Only measures draws that consumed a new frame (not the rotation/resize ones)
         if (measureLatency && newFrame) {
             GLES20.glFinish();
             recordLatency(System.nanoTime() - frameAvailableNs);
         }
     }
 
-    // Cena de um olho na região [x, x + width) x [0, viewHeight) do framebuffer atual
+    // Scene of one eye in the region [x, x + width) x [0, viewHeight) of the current framebuffer
     private void drawEye(int eye, int x, int width, boolean tracked) {
         GLES20.glUseProgram(program);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
@@ -372,7 +372,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         GLES20.glVertexAttribPointer(posLoc, 2, GLES20.GL_FLOAT, false, 0, quad);
 
         if (tracked) {
-            // Tela virtual no mundo; cada olho enxerga a partir do seu lado (±IPD/2)
+            // Virtual screen in the world; each eye sees from its own side (±IPD/2)
             float shift = (eye == 0 ? 1 : -1) * ipd / 2;
             Matrix.setIdentityM(eyeShift, 0);
             Matrix.translateM(eyeShift, 0, shift, 0, 0);
@@ -384,7 +384,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
             GLES20.glUniformMatrix4fv(mvpLoc, 1, false, mvp, 0);
         }
         else {
-            // O vídeo ocupa o maior retângulo com a proporção original (barras pretas no resto)
+            // The video takes the largest rectangle with the original aspect ratio (black bars elsewhere)
             float videoAspect = (float) videoWidth / videoHeight;
             int w = width;
             int h = (int) (w / videoAspect);
@@ -413,7 +413,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         GLES20.glDisableVertexAttribArray(distPosLoc);
     }
 
-    // Framebuffer com uma textura do tamanho de um olho; false se o aparelho não o aceitar
+    // Framebuffer with a texture the size of one eye; false if the device does not accept it
     private boolean ensureFbo(int width, int height) {
         if (fbo != 0 && fboWidth == width && fboHeight == height) {
             return true;
@@ -440,7 +440,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         boolean ok = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE;
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
         if (!ok) {
-            VrLog.w("GL:", "Framebuffer incompleto; sem correção de distorção");
+            VrLog.w("GL:", "Incomplete framebuffer; no distortion correction");
             return false;
         }
         fboWidth = width;
@@ -461,7 +461,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         statsFrames++;
         statsSumNs += ns;
         statsMaxNs = Math.max(statsMaxNs, ns);
-        // Intervalo entre quadros de vídeo desenhados: a imagem "trava" quando ele passa de ~2 quadros (33 ms a 60 fps)
+        // Gap between drawn video frames: the image "stalls" when it exceeds ~2 frames (33 ms at 60 fps)
         if (statsLastFrameNs != 0) {
             long gap = now - statsLastFrameNs;
             statsMaxGapNs = Math.max(statsMaxGapNs, gap);
@@ -470,7 +470,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         statsLastFrameNs = now;
 
         if (now - statsStartNs >= 2_000_000_000L) {
-            VrLog.i("GL:", "%d quadros em %.1f s, atraso quadro->desenho medio %.2f ms, max %.2f ms, intervalo max %.1f ms, travadas(>33ms) %d",
+            VrLog.i("GL:", "%d frames in %.1f s, frame->draw delay avg %.2f ms, max %.2f ms, max gap %.1f ms, stalls(>33ms) %d",
                     statsFrames, (now - statsStartNs) / 1e9, statsSumNs / 1e6 / statsFrames, statsMaxNs / 1e6,
                     statsMaxGapNs / 1e6, statsSlowGaps);
             statsFrames = 0;
@@ -491,7 +491,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         int[] status = new int[1];
         GLES20.glGetProgramiv(prog, GLES20.GL_LINK_STATUS, status, 0);
         if (status[0] == 0) {
-            throw new IllegalStateException("Falha ao ligar o programa GL: " + GLES20.glGetProgramInfoLog(prog));
+            throw new IllegalStateException("Failed to link the GL program: " + GLES20.glGetProgramInfoLog(prog));
         }
         return prog;
     }
@@ -503,7 +503,7 @@ public class StereoGLView extends GLSurfaceView implements GLSurfaceView.Rendere
         int[] status = new int[1];
         GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, status, 0);
         if (status[0] == 0) {
-            throw new IllegalStateException("Falha ao compilar o shader GL: " + GLES20.glGetShaderInfoLog(shader));
+            throw new IllegalStateException("Failed to compile the GL shader: " + GLES20.glGetShaderInfoLog(shader));
         }
         return shader;
     }

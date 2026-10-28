@@ -259,7 +259,7 @@ public class StreamSettings extends Activity {
             pref.setEntryValues(entryValues);
         }
 
-        // Ao ligar a opção de `key`, desliga as opções de `others`
+        // When the `key` option is turned on, turns off the `others` options
         private void linkExclusive(String key, final String... others) {
             Preference pref = findPreference(key);
             if (pref == null) {
@@ -299,12 +299,12 @@ public class StreamSettings extends Activity {
         public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
             View view = super.onCreateView(inflater, container, savedInstanceState);
 
-            // O padding da barra de navegação vai na própria lista (e não na raiz do fragmento)
-            // para a lista rolar até o fim sem ficar atrás da barra
+            // The navigation bar padding goes on the list itself (not on the fragment root)
+            // so the list scrolls all the way down without ending up behind the bar
             ListView list = view.findViewById(android.R.id.list);
             list.setClipToPadding(false);
-            // O listener de insets não chega até a lista nesta tela, então lemos os insets da
-            // janela direto quando a lista entra na tela
+            // The insets listener does not reach the list on this screen, so we read the window
+            // insets directly when the list enters the screen
             list.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
                 @Override
                 public void onViewAttachedToWindow(View v) {
@@ -322,7 +322,7 @@ public class StreamSettings extends Activity {
                 public void onViewDetachedFromWindow(View v) {}
             });
 
-            // Barra de pesquisa acima da lista
+            // Search box above the list
             ViewGroup searchParent = (ViewGroup) list.getParent().getParent();
             EditText search = (EditText) inflater.inflate(R.layout.settings_search_box, searchParent, false);
             search.addTextChangedListener(new TextWatcher() {
@@ -342,7 +342,7 @@ public class StreamSettings extends Activity {
             return view;
         }
 
-        // Categorias e preferências como carregadas do XML (já com os ajustes do onCreate)
+        // Categories and preferences as loaded from the XML (already with the onCreate adjustments)
         private final List<PreferenceCategory> allCategories = new ArrayList<>();
         private final Map<PreferenceCategory, List<Preference>> allChildren = new HashMap<>();
 
@@ -370,7 +370,7 @@ public class StreamSettings extends Activity {
             String query = rawQuery.trim().toLowerCase();
             PreferenceScreen screen = getPreferenceScreen();
 
-            // Primeiro decide o que aparece; categoria que bate mostra todas as suas opções
+            // First decide what shows up; a matching category shows all of its options
             Set<Preference> shown = new HashSet<>();
             Map<String, Preference> byKey = new HashMap<>();
             for (PreferenceCategory category : allCategories) {
@@ -385,8 +385,8 @@ public class StreamSettings extends Activity {
                 }
             }
 
-            // O Android não deixa religar uma opção cuja dependência está fora da tela,
-            // então as dependências (e as delas) entram junto
+            // Android does not allow re-enabling an option whose dependency is off screen,
+            // so the dependencies (and theirs) are included too
             List<Preference> pending = new ArrayList<>(shown);
             while (!pending.isEmpty()) {
                 Preference dependency = byKey.get(pending.remove(pending.size() - 1).getDependency());
@@ -755,7 +755,7 @@ public class StreamSettings extends Activity {
 
             // Add a listener to the FPS and resolution preference
             // so the bitrate can be auto-adjusted
-            // Posição por ARCore e andar no lugar / inclinar a cabeça mandam as mesmas teclas: ligar um desliga os outros
+            // ARCore position and walking in place / head tilt send the same keys: turning one on turns the others off
             linkExclusive("checkbox_vr_position", "checkbox_vr_walk", "checkbox_vr_strafe");
             linkExclusive("checkbox_vr_walk", "checkbox_vr_position");
             linkExclusive("checkbox_vr_strafe", "checkbox_vr_position");

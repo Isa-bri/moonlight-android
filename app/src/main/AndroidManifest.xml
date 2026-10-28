@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- O ARCore pede API 24; o código só o usa a partir dela -->
+    <!-- ARCore requires API 24; the code only uses it from that level on -->
     <uses-sdk tools:overrideLibrary="com.google.ar.core" />
 
     <uses-permission android:name="android.permission.INTERNET" />

@@ -1,22 +1,22 @@
 package com.limelight.vr;
 
-// Lógica da cabeça = câmera, sem Android (testável na JVM): recebe o olhar (yaw/pitch em graus) a cada tick e devolve quantas
-// contagens de mouse mandar. O HeadMouse cuida do sensor, da thread, do envio e do log.
+// Head = camera logic, without Android (testable on the JVM): receives the gaze (yaw/pitch in degrees) on each tick and returns how
+// many mouse counts to send. HeadMouse handles the sensor, the thread, sending and logging.
 //
-// - Passo de giro por tick, com a volta de 180° tratada e uma zona morta de 0,005°.
-// - Zona morta vertical ao andar: o pitch só passa depois de sair de uma faixa em volta da última posição.
-// - Giro na borda: passando de `edgeDeg` graus do centro, a câmera continua girando (contínuo, mais rápido quanto mais longe)
-//   ou, com `snapTurn`, dá um giro fixo de SNAP_STEP_DEG e só gira de novo depois que a cabeça volta para perto do centro.
-// - Olhando quase reto para cima/baixo o yaw é instável (singularidade): abaixo de GIMBAL_HORIZ ele não gira o mouse.
+// - Turn step per tick, with the 180° wrap-around handled and a deadzone of 0.005°.
+// - Vertical deadzone while walking: the pitch only passes after leaving a band around the last position.
+// - Edge turn: past `edgeDeg` degrees from the center, the camera keeps turning (continuous, faster the farther out)
+//   or, with `snapTurn`, makes a fixed turn of SNAP_STEP_DEG and only turns again after the head returns near the center.
+// - Looking almost straight up/down the yaw is unstable (singularity): below GIMBAL_HORIZ it does not turn the mouse.
 public class HeadMotion {
     public static final float DEADZONE_DEG = 0.005f;
-    public static final float EDGE_RAMP_DEG = 15f;        // da borda até a velocidade máxima
-    public static final float EDGE_MAX_DEG_PER_S = 120f;  // velocidade máxima do giro contínuo
-    public static final float SNAP_STEP_DEG = 30f;        // giro de cada passo do snap turn
-    public static final float SNAP_DEG_PER_S = 360f;      // velocidade do giro do passo (~80 ms), rápido para não enjoar
-    public static final float SNAP_REARM_DEG = 10f;       // quanto voltar para dentro da borda antes de girar outra vez
-    public static final float GIMBAL_HORIZ = 0.0872f;     // cos(85°): componente horizontal do olhar abaixo da qual o yaw congela
-    public static final float JUMP_DEG = 3f;              // giro por tick que não é de cabeça humana
+    public static final float EDGE_RAMP_DEG = 15f;        // from the edge up to the maximum speed
+    public static final float EDGE_MAX_DEG_PER_S = 120f;  // maximum speed of the continuous turn
+    public static final float SNAP_STEP_DEG = 30f;        // turn of each snap turn step
+    public static final float SNAP_DEG_PER_S = 360f;      // speed of the step turn (~80 ms), fast to avoid nausea
+    public static final float SNAP_REARM_DEG = 10f;       // how far to come back inside the edge before turning again
+    public static final float GIMBAL_HORIZ = 0.0872f;     // cos(85°): horizontal component of the gaze below which the yaw freezes
+    public static final float JUMP_DEG = 3f;              // turn per tick that is not from a human head
 
     public static final int EVENT_NONE = 0;
     public static final int EVENT_STARTED = 1;
@@ -25,12 +25,12 @@ public class HeadMotion {
     private final float countsPerDegree;
     private final float pitchCountsPerDegree;
 
-    // Parâmetros (podem mudar com o app rodando)
-    public volatile float edgeDeg;          // 0 = sem giro na borda
+    // Parameters (can change while the app is running)
+    public volatile float edgeDeg;          // 0 = no edge turn
     public volatile boolean snapTurn;
-    public volatile float walkPitchBandDeg; // 0 = sem zona morta vertical
+    public volatile float walkPitchBandDeg; // 0 = no vertical deadzone
 
-    // Estado
+    // State
     private boolean hasPrev;
     private float prevYaw, prevPitch, centerYaw, anchorPitch;
     private long prevNs;
@@ -42,27 +42,27 @@ public class HeadMotion {
     private long edgeStartNs;
     private float edgeTurned, snapRemaining;
 
-    // Resultado do último update()
+    // Result of the last update()
     public int mx, my;
-    public float rawDYaw, rawDPitch;   // giro do tick antes das zonas mortas
-    public float dYaw, dPitch;         // giro que de fato virou mouse (sem a parte da borda)
-    public float edgeYaw;              // giro da borda somado neste tick
-    public float absorbedPitch;        // pitch engolido pela zona morta vertical neste tick
+    public float rawDYaw, rawDPitch;   // turn of the tick before the deadzones
+    public float dYaw, dPitch;         // turn that actually became mouse movement (without the edge part)
+    public float edgeYaw;              // edge turn added on this tick
+    public float absorbedPitch;        // pitch swallowed by the vertical deadzone on this tick
     public long dtNs;
     public int deadzoneHits;
     public boolean jump, gimbalFrozen;
     public int walkEvent, edgeEvent;
-    public float eventRel;             // giro relativo ao centro quando a borda começou
-    public float eventTurned;          // graus girados pela borda (no EVENT_ENDED da borda)
-    public float eventSeconds;         // duração (no EVENT_ENDED da borda e do andar)
-    public float eventAbsorbed;        // pitch engolido no andar inteiro (no EVENT_ENDED do andar)
+    public float eventRel;             // turn relative to the center when the edge started
+    public float eventTurned;          // degrees turned by the edge (on the edge's EVENT_ENDED)
+    public float eventSeconds;         // duration (on the EVENT_ENDED of the edge and of walking)
+    public float eventAbsorbed;        // pitch swallowed over the whole walk (on the walking EVENT_ENDED)
 
     public HeadMotion(float countsPerDegree, float pitchScale) {
         this.countsPerDegree = countsPerDegree;
         this.pitchCountsPerDegree = countsPerDegree * pitchScale;
     }
 
-    // O próximo update() só define o centro (sem movimento), como depois de pausa/embreagem
+    // The next update() only sets the center (no movement), as after a pause/clutch
     public void invalidate() {
         hasPrev = false;
     }
@@ -71,7 +71,7 @@ public class HeadMotion {
         return hasPrev;
     }
 
-    // Termina o giro da borda em andamento (pausa); preenche edgeEvent para o chamador registrar
+    // Ends the edge turn in progress (pause); fills in edgeEvent for the caller to log
     public void endEdge(long nowNs) {
         edgeEvent = EVENT_NONE;
         if (edgeActive) {
@@ -86,8 +86,8 @@ public class HeadMotion {
         return centerYaw;
     }
 
-    // yaw/pitch em graus; horizLen = componente horizontal do vetor do olhar (1 olhando na horizontal, 0 reto para cima/baixo).
-    // false na chamada que só definiu o centro (não houve movimento).
+    // yaw/pitch in degrees; horizLen = horizontal component of the gaze vector (1 looking horizontally, 0 straight up/down).
+    // false on the call that only set the center (there was no movement).
     public boolean update(float yaw, float pitch, float horizLen, long nowNs, boolean walking) {
         mx = my = 0;
         rawDYaw = rawDPitch = dYaw = dPitch = edgeYaw = absorbedPitch = 0;
@@ -96,7 +96,7 @@ public class HeadMotion {
         walkEvent = edgeEvent = EVENT_NONE;
 
         if (!hasPrev) {
-            // Recentrar termina o que estava em andamento (e avisa o chamador, para o log não ficar com a borda "ativa")
+            // Recentering ends whatever was in progress (and tells the caller, so the log is not left with the edge "active")
             endEdge(nowNs);
             if (wasWalking) {
                 walkEvent = EVENT_ENDED;
@@ -117,8 +117,8 @@ public class HeadMotion {
             return false;
         }
         if (horizLen < GIMBAL_HORIZ) {
-            // O yaw é ruído aqui: não vira mouse, mas vira a nova referência (e leva o centro junto), para a câmera não
-            // dar um salto quando o olhar sair do polo
+            // The yaw is noise here: it does not become mouse movement, but it becomes the new reference (and takes the center
+            // along), so the camera does not jump when the gaze leaves the pole
             centerYaw += wrap(yaw - prevYaw);
             prevYaw = yaw;
             gimbalFrozen = true;
@@ -136,7 +136,7 @@ public class HeadMotion {
         rawDPitch = dP;
         jump = Math.abs(dY) > JUMP_DEG || Math.abs(dP) > JUMP_DEG;
 
-        // Ao andar, o pitch só segue quando sai da faixa em volta da âncora
+        // While walking, the pitch only follows when it leaves the band around the anchor
         boolean walkingNow = walkPitchBandDeg > 0 && walking;
         if (walkingNow) {
             if (!wasWalking) {
@@ -161,7 +161,7 @@ public class HeadMotion {
         }
         wasWalking = walkingNow;
 
-        // Giro na borda
+        // Edge turn
         float edge = edgeDeg;
         if (edge > 0) {
             float rel = wrap(yaw - centerYaw);
@@ -192,7 +192,7 @@ public class HeadMotion {
             else {
                 endEdge(nowNs);
             }
-            // O snap turn só gira de novo depois que a cabeça volta para dentro da borda (com folga)
+            // The snap turn only turns again after the head comes back inside the edge (with some margin)
             if (!snapArmed && Math.abs(rel) < edge - SNAP_REARM_DEG) {
                 snapArmed = true;
                 snapRemaining = 0;
@@ -204,7 +204,7 @@ public class HeadMotion {
         dYaw = dY;
         dPitch = dP;
 
-        // Guarda a fração que não cabe num inteiro para não perder movimento lento
+        // Keep the fraction that does not fit in an integer so slow movement is not lost
         remX += (dY + edgeYaw) * countsPerDegree;
         remY += -dP * pitchCountsPerDegree;
         mx = (int) remX;

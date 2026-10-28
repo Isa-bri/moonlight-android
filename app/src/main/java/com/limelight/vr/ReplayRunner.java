@@ -7,16 +7,16 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-// Replay de um rastro gravado (ver VrTrace) pelas MESMAS classes que rodam no celular: ArPipeline, StepPipeline e HeadMotion.
-// Sem Android: roda na JVM (testes do Gradle) e dentro do app (broadcast DECKVR_REPLAY), e, com um `Sink` e um `Pacer`, ao vivo,
-// mandando as saídas para o caminho real (teclas, mouse, analógico) no ritmo em que foram gravadas.
+// Replay of a recorded trace (see VrTrace) through the SAME classes that run on the phone: ArPipeline, StepPipeline and HeadMotion.
+// No Android: runs on the JVM (Gradle tests) and inside the app (DECKVR_REPLAY broadcast), and, with a `Sink` and a `Pacer`, live,
+// sending the outputs to the real path (keys, mouse, analog stick) at the pace they were recorded.
 //
-// Regras (arquivo .regras, uma por linha; `#` comenta):
-//   margem 1.0                              segundos ignorados no começo e no fim de cada segmento (transição)
-//   regra <rotulo> <metrica> <op> <valor>   vale para todo segmento cujo rótulo é igual ou começa com <rotulo>
-// Métricas: tecla_W_fracao, tecla_A_fracao, tecla_S_fracao, tecla_D_fracao, max_teclas_fracao, stick_max, stick_x_med,
-// stick_y_med, mouse_por_s, mouse_x_por_s, mouse_y_por_s.   Operadores: <=  >=
-// Uma regra sem nenhum segmento correspondente FALHA (nunca passa por não ter sido conferida).
+// Rules (.rules file, one per line; `#` comments):
+//   margin 1.0                              seconds ignored at the start and end of each segment (transition)
+//   rule <label> <metric> <op> <value>      applies to every segment whose label is equal to or starts with <label>
+// Metrics: key_W_fraction, key_A_fraction, key_S_fraction, key_D_fraction, max_keys_fraction, stick_max, stick_x_avg,
+// stick_y_avg, mouse_per_s, mouse_x_per_s, mouse_y_per_s.   Operators: <=  >=
+// A rule with no matching segment FAILS (it never passes just because it was not checked).
 public final class ReplayRunner {
     public interface Sink {
         void key(char key, boolean down);
@@ -24,7 +24,7 @@ public final class ReplayRunner {
         void mouse(int dx, int dy);
     }
 
-    // Ao vivo: espera até o instante do rastro (relativo ao primeiro) antes de processar a linha; false = abortar já
+    // Live: waits until the trace instant (relative to the first) before processing the line; false = abort now
     public interface Pacer {
         boolean waitUntil(long relativeMs);
     }
@@ -44,8 +44,10 @@ public final class ReplayRunner {
     }
 
     private static final String KEYS = "WASD";
+    private static final String KEY_METRIC_PREFIX = "key_";
+    private static final String KEY_METRIC_SUFFIX = "_fraction";
 
-    // Linha do rastro já separada, para ordenar por `tc`
+    // Trace line already split, to sort by `tc`
     private static final class Rec implements Comparable<Rec> {
         final long tc;
         final int order;
@@ -64,22 +66,22 @@ public final class ReplayRunner {
     }
 
     private static final class Timeline {
-        final List<long[]> keys = new ArrayList<>();       // {tc, indice da tecla, 1=desceu/0=subiu}
+        final List<long[]> keys = new ArrayList<>();       // {tc, key index, 1=down/0=up}
         final List<double[]> sticks = new ArrayList<>();   // {tc, x, y}
         final List<double[]> mice = new ArrayList<>();     // {tc, dx, dy}
-        final List<Object[]> marks = new ArrayList<>();    // {tc, rotulo}
+        final List<Object[]> marks = new ArrayList<>();    // {tc, label}
         long start = Long.MAX_VALUE, end = Long.MIN_VALUE;
     }
 
     private ReplayRunner() {}
 
-    // Roda o rastro e confere as regras
+    // Runs the trace and checks the rules
     public static Result run(String name, List<String> trace, List<String> rules) {
         Timeline tl = play(trace, null, null);
         return evaluate(name, tl, rules);
     }
 
-    // Só reproduz (ao vivo, com `sink`/`pacer`); devolve quantas linhas processou
+    // Only plays it back (live, with `sink`/`pacer`); returns how many lines it processed
     public static int playLive(List<String> trace, Sink sink, Pacer pacer) {
         Timeline tl = play(trace, sink, pacer);
         return tl.marks.size();
@@ -144,7 +146,7 @@ public final class ReplayRunner {
         }
         final long base = recs.get(0).tc;
 
-        // Quem produz saída: as mesmas classes de produção, com os parâmetros gravados
+        // What produces output: the same production classes, with the recorded parameters
         final long[] now = {base};
         MoveOutput out = new MoveOutput() {
             @Override
@@ -164,15 +166,15 @@ public final class ReplayRunner {
                 }
             }
         };
-        boolean analog = bool(cfg, "analogico");
+        boolean analog = bool(cfg, "analog");
         ArPipeline ar = bool(cfg, "ar")
                 ? new ArPipeline(num(cfg, "ar_cm", 10) / 100f, bool(cfg, "ar_hold"), analog, out) : null;
-        StepPipeline steps = bool(cfg, "passos")
-                ? new StepPipeline(num(cfg, "passos_limiar", 2.0f), 380_000_000L, 1_200_000_000L, 900_000_000L, analog, out) : null;
+        StepPipeline steps = bool(cfg, "steps")
+                ? new StepPipeline(num(cfg, "steps_threshold", 2.0f), 380_000_000L, 1_200_000_000L, 900_000_000L, analog, out) : null;
         HeadMotion head = new HeadMotion(num(cfg, "sens", 10), num(cfg, "vert", 100) / 100f);
-        head.edgeDeg = bool(cfg, "borda") ? num(cfg, "borda_graus", 45) : 0;
-        head.snapTurn = bool(cfg, "passos_borda");
-        head.walkPitchBandDeg = num(cfg, "banda", 1.5f);
+        head.edgeDeg = bool(cfg, "edge") ? num(cfg, "edge_deg", 45) : 0;
+        head.snapTurn = bool(cfg, "edge_steps");
+        head.walkPitchBandDeg = num(cfg, "band", 1.5f);
 
         for (Rec r : recs) {
             now[0] = r.tc;
@@ -213,7 +215,7 @@ public final class ReplayRunner {
                         break;
                     }
                     case "v":
-                        if (f[2].equals("recentrar") && ar != null) {
+                        if (f[2].equals("recenter") && ar != null) {
                             ar.requestRecenter();
                         }
                         break;
@@ -221,7 +223,7 @@ public final class ReplayRunner {
                         break;
                 }
             } catch (RuntimeException e) {
-                // linha malformada: ignora (o replay não pode derrubar o app)
+                // malformed line: ignore it (the replay must not bring the app down)
             }
         }
         if (ar != null) {
@@ -233,26 +235,26 @@ public final class ReplayRunner {
         return tl;
     }
 
-    // ---- Regras ----
+    // ---- Rules ----
 
     private static Result evaluate(String name, Timeline tl, List<String> rules) {
         Result res = new Result(name);
-        double margem = 1.0;
-        List<String[]> regras = new ArrayList<>();
+        double margin = 1.0;
+        List<String[]> parsedRules = new ArrayList<>();
         for (String raw : rules) {
             String line = raw.trim();
             if (line.isEmpty() || line.startsWith("#")) {
                 continue;
             }
             String[] p = line.split("\\s+");
-            if (p[0].equals("margem") && p.length >= 2) {
-                margem = Double.parseDouble(p[1]);
+            if (p[0].equals("margin") && p.length >= 2) {
+                margin = Double.parseDouble(p[1]);
             }
-            else if (p[0].equals("regra") && p.length >= 5) {
-                regras.add(p);
+            else if (p[0].equals("rule") && p.length >= 5) {
+                parsedRules.add(p);
             }
         }
-        // Segmentos a partir das marcas
+        // Segments from the marks
         List<Object[]> segs = new ArrayList<>();
         List<Object[]> marks = new ArrayList<>(tl.marks);
         for (int i = 0; i < marks.size(); i++) {
@@ -261,21 +263,21 @@ public final class ReplayRunner {
             segs.add(new Object[]{marks.get(i)[1], a, b});
         }
         if (segs.isEmpty() && tl.end > tl.start) {
-            segs.add(new Object[]{"tudo", tl.start, tl.end});
+            segs.add(new Object[]{"all", tl.start, tl.end});
         }
-        for (String[] r : regras) {
-            String rotulo = r[1], metrica = r[2], op = r[3];
-            double limite = Double.parseDouble(r[4]);
-            int casou = 0;
+        for (String[] r : parsedRules) {
+            String ruleLabel = r[1], metricName = r[2], op = r[3];
+            double limit = Double.parseDouble(r[4]);
+            int matched = 0;
             for (Object[] seg : segs) {
                 String label = (String) seg[0];
-                if (!(label.equals(rotulo) || label.startsWith(rotulo))) {
+                if (!(label.equals(ruleLabel) || label.startsWith(ruleLabel))) {
                     continue;
                 }
                 long a = (Long) seg[1], b = (Long) seg[2];
-                long m = Math.round(margem * 1000);
+                long m = Math.round(margin * 1000);
                 long wa = a + m, wb = b - m;
-                if (wb - wa < 300) { // segmento curto: usa o miolo
+                if (wb - wa < 300) { // short segment: use the middle
                     long len = b - a;
                     wa = a + len / 4;
                     wb = b - len / 4;
@@ -283,38 +285,39 @@ public final class ReplayRunner {
                 if (wb <= wa) {
                     continue;
                 }
-                casou++;
-                double v = metric(tl, metrica, wa, wb);
-                boolean ok = op.equals("<=") ? v <= limite + 1e-9 : v >= limite - 1e-9;
+                matched++;
+                double v = metric(tl, metricName, wa, wb);
+                boolean ok = op.equals("<=") ? v <= limit + 1e-9 : v >= limit - 1e-9;
                 res.checked++;
                 if (!ok) {
                     res.failed++;
                 }
-                res.lines.add(String.format(Locale.US, "%s segmento=%s regra=\"%s %s %s %s\" medido=%.3f",
-                        ok ? "PASSOU" : "FALHOU", label, rotulo, metrica, op, r[4], v));
+                res.lines.add(String.format(Locale.US, "%s segment=%s rule=\"%s %s %s %s\" measured=%.3f",
+                        ok ? "PASSED" : "FAILED", label, ruleLabel, metricName, op, r[4], v));
             }
-            if (casou == 0) {
+            if (matched == 0) {
                 res.checked++;
                 res.failed++;
-                res.lines.add(String.format(Locale.US, "FALHOU regra=\"%s %s %s %s\" nenhum segmento com esse rótulo (ou curto demais): não conferido",
-                        rotulo, metrica, op, r[4]));
+                res.lines.add(String.format(Locale.US, "FAILED rule=\"%s %s %s %s\" no segment with that label (or too short): not checked",
+                        ruleLabel, metricName, op, r[4]));
             }
         }
-        if (regras.isEmpty()) {
+        if (parsedRules.isEmpty()) {
             res.checked++;
             res.failed++;
-            res.lines.add("FALHOU nenhuma regra no arquivo: nada foi conferido");
+            res.lines.add("FAILED no rule in the file: nothing was checked");
         }
         return res;
     }
 
-    private static double metric(Timeline tl, String metrica, long a, long b) {
+    private static double metric(Timeline tl, String metricName, long a, long b) {
         double dur = (b - a) / 1000.0;
-        if (metrica.startsWith("tecla_") && metrica.endsWith("_fracao")) {
-            return keyFraction(tl, KEYS.indexOf(metrica.charAt(6)), a, b);
+        if (metricName.startsWith(KEY_METRIC_PREFIX) && metricName.endsWith(KEY_METRIC_SUFFIX)
+                && metricName.length() > KEY_METRIC_PREFIX.length()) {
+            return keyFraction(tl, KEYS.indexOf(metricName.charAt(KEY_METRIC_PREFIX.length())), a, b);
         }
-        switch (metrica) {
-            case "max_teclas_fracao": {
+        switch (metricName) {
+            case "max_keys_fraction": {
                 double mx = 0;
                 for (int k = 0; k < 4; k++) {
                     mx = Math.max(mx, keyFraction(tl, k, a, b));
@@ -332,9 +335,9 @@ public final class ReplayRunner {
                 }
                 return mx;
             }
-            case "stick_x_med":
-            case "stick_y_med": {
-                int c = metrica.equals("stick_x_med") ? 0 : 1;
+            case "stick_x_avg":
+            case "stick_y_avg": {
+                int c = metricName.equals("stick_x_avg") ? 0 : 1;
                 double[] cur = stickAt(tl, a);
                 double v = cur[c], t = a, acc = 0;
                 for (double[] s : tl.sticks) {
@@ -348,9 +351,9 @@ public final class ReplayRunner {
                 acc += v * (b - t);
                 return acc / (b - a);
             }
-            case "mouse_por_s":
-            case "mouse_x_por_s":
-            case "mouse_y_por_s": {
+            case "mouse_per_s":
+            case "mouse_x_per_s":
+            case "mouse_y_per_s": {
                 double sx = 0, sy = 0, sabs = 0;
                 for (double[] m : tl.mice) {
                     if (m[0] >= a && m[0] < b) {
@@ -359,7 +362,7 @@ public final class ReplayRunner {
                         sabs += Math.abs(m[1]) + Math.abs(m[2]);
                     }
                 }
-                return (metrica.equals("mouse_por_s") ? sabs : metrica.equals("mouse_x_por_s") ? sx : sy) / dur;
+                return (metricName.equals("mouse_per_s") ? sabs : metricName.equals("mouse_x_per_s") ? sx : sy) / dur;
             }
             default:
                 return Double.NaN;

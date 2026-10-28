@@ -25,16 +25,16 @@ import com.limelight.nvstream.input.KeyboardPacket;
 import java.util.EnumSet;
 import java.util.List;
 
-// Posição da cabeça pelo ARCore (câmera traseira + sensores) para andar de verdade: a lógica (eixos do corpo, recentrar, salto de
-// pose, modos "só enquanto se move", joystick e analógico) está em ArPipeline, sem Android; esta classe cuida da sessão do ARCore,
-// do envio das teclas e do log. recenter() move a origem para onde a cabeça está agora.
+// Head position through ARCore (rear camera + sensors) for real walking: the logic (body axes, recenter, pose jump,
+// "only while moving", joystick and analog modes) lives in ArPipeline, without Android; this class handles the ARCore session,
+// sending the keys and logging. recenter() moves the origin to where the head is now.
 //
-// Diagnóstico (VrLog, linhas AR): quadros/s e maior intervalo entre quadros, deslocamento frente/lado mínimo e máximo por segundo,
-// cada tecla que desce/sobe com o deslocamento do momento e quanto tempo ficou segurada, perdas de rastreamento com a duração,
-// saltos de pose entre quadros seguidos e a deriva da origem a cada recentrada.
+// Diagnostics (VrLog, AR lines): frames/s and the largest gap between frames, minimum and maximum forward/side displacement per
+// second, each key that goes down/up with the displacement at that moment and how long it was held, tracking losses with their
+// duration, pose jumps between consecutive frames and the origin drift at each recenter.
 //
-// O ARCore precisa de uma textura OES para a imagem da câmera, então esta classe tem o próprio contexto EGL
-// (superfície 1x1) numa thread dedicada, sem relação com o StereoGLView.
+// ARCore needs an OES texture for the camera image, so this class has its own EGL context
+// (1x1 surface) on a dedicated thread, unrelated to StereoGLView.
 public class ArPosition {
     private static final long LOG_WINDOW_MS = 1000;
 
@@ -46,12 +46,12 @@ public class ArPosition {
     private final Context context;
     private final NvConnection conn;
     private final float thresholdM;
-    private final boolean holdMode; // true = joystick (segura enquanto longe da origem); false = só enquanto se move
-    private final MoveStick stickSink; // não nulo = movimento vira analógico esquerdo em vez de W/A/S/D
+    private final boolean holdMode; // true = joystick (holds while away from the origin); false = only while moving
+    private final MoveStick stickSink; // non-null = movement becomes the left analog stick instead of W/A/S/D
     private final ArPipeline pipeline;
 
-    // Só para testes por broadcast: soma ao deslocamento medido um deslocamento que cresce na velocidade pedida (m/s);
-    // enquanto ativo, o rastreamento perdido não atrapalha (usa a última pose), para o teste não depender da câmera enxergar algo
+    // Broadcast tests only: adds to the measured displacement one that grows at the requested speed (m/s);
+    // while active, lost tracking does not interfere (it uses the last pose), so the test does not depend on the camera seeing anything
     private volatile float testVF, testVS;
     private volatile boolean testActive;
     private long lastTestNs;
@@ -62,7 +62,7 @@ public class ArPosition {
 
     private long lastLog;
 
-    // Diagnóstico, só na thread do ARCore
+    // Diagnostics, ARCore thread only
     private long heldFwdNs, heldBackNs, heldLeftNs, heldRightNs;
     private long lostSinceNs;
     private long lastFrameNs, winMaxGapNs;
@@ -116,14 +116,14 @@ public class ArPosition {
         return pipeline.isWalking();
     }
 
-    // Teste por broadcast: velocidade falsa (m/s) para a frente e para a direita; 0,0 para de crescer (o deslocamento fica)
+    // Broadcast test: fake speed (m/s) forward and to the right; 0,0 stops the growth (the displacement stays)
     public void setTestVelocity(float forwardMps, float sideMps) {
         testVF = forwardMps;
         testVS = sideMps;
         testActive = true;
     }
 
-    // A próxima leitura vira a origem
+    // The next reading becomes the origin
     public void recenter() {
         pipeline.requestRecenter();
     }
@@ -156,7 +156,7 @@ public class ArPosition {
 
             session = new Session(context);
 
-            // Menor resolução a 30 fps: só a posição interessa, e isso poupa calor
+            // Lowest resolution at 30 fps: only the position matters, and this saves heat
             CameraConfigFilter filter = new CameraConfigFilter(session)
                     .setTargetFps(EnumSet.of(CameraConfig.TargetFps.TARGET_FPS_30));
             List<CameraConfig> cameraConfigs = session.getSupportedCameraConfigs(filter);
@@ -179,8 +179,8 @@ public class ArPosition {
             session.setCameraTextureName(tex[0]);
             session.setDisplayGeometry(Surface.ROTATION_90, 1, 1);
             session.resume();
-            VrLog.i("AR", "iniciado modo=%s limiar=%.0fcm lado=%.0fcm resolucao=%s",
-                    stickSink != null ? "analogico" : holdMode ? "joystick(segura longe da origem)" : "so_enquanto_se_move",
+            VrLog.i("AR", "started mode=%s threshold=%.0fcm side=%.0fcm resolution=%s",
+                    stickSink != null ? "analog" : holdMode ? "joystick(holds while away from the origin)" : "only_while_moving",
                     thresholdM * 100, thresholdM * ArPipeline.SIDE_FACTOR * 100,
                     smallest != null ? smallest.getImageSize().getWidth() + "x" + smallest.getImageSize().getHeight() : "?");
 
@@ -197,10 +197,10 @@ public class ArPosition {
                 TrackingState state = camera.getTrackingState();
                 boolean tracking = state == TrackingState.TRACKING;
                 if (state != last) {
-                    VrLog.w("AR", "rastreamento %s motivo=%s", state, camera.getTrackingFailureReason());
+                    VrLog.w("AR", "tracking %s reason=%s", state, camera.getTrackingFailureReason());
                     if (tracking) {
                         if (lostSinceNs != 0) {
-                            VrLog.i("AR", "rastreamento voltou apos %.1fs", (frameNs - lostSinceNs) / 1e9);
+                            VrLog.i("AR", "tracking back after %.1fs", (frameNs - lostSinceNs) / 1e9);
                         }
                         lostSinceNs = 0;
                     }
@@ -216,7 +216,7 @@ public class ArPosition {
                     Pose pose = camera.getPose();
                     x = pose.tx();
                     z = pose.tz();
-                    float[] zAxis = pose.getZAxis(); // sai da tela; o olhar é -Z
+                    float[] zAxis = pose.getZAxis(); // points out of the screen; the gaze is -Z
                     hx = -zAxis[0];
                     hz = -zAxis[2];
                     lastX = x;
@@ -231,7 +231,7 @@ public class ArPosition {
                     hz = lastHz;
                 }
                 VrTrace.ar(frameNs, x, z, hx, hz, tracking);
-                // Em teste, o rastreamento perdido é ignorado (a câmera pode estar de frente para uma mesa vazia)
+                // In a test, lost tracking is ignored (the camera may be facing an empty table)
                 boolean effective = tracking || testActive;
 
                 if (lastTestNs != 0 && testActive) {
@@ -247,13 +247,13 @@ public class ArPosition {
                     continue;
                 }
                 if (pipeline.recentered) {
-                    // Quanto a origem antiga estava longe de onde a cabeça foi parar: é a deriva (ou o deslocamento real)
-                    VrLog.i("AR", "recentrou deslocamento_antes frente=%+.2fm lado=%+.2fm",
+                    // How far the old origin was from where the head ended up: it is the drift (or the real displacement)
+                    VrLog.i("AR", "recentered offset_before forward=%+.2fm side=%+.2fm",
                             pipeline.recenterBeforeForward, pipeline.recenterBeforeSide);
                 }
                 if (pipeline.poseJumped) {
                     winJumps++;
-                    VrLog.w("AR", "salto de pose entre quadros (%.0fms): ignorado, sem tecla", (frameNs - lastPoseNs) / 1e6);
+                    VrLog.w("AR", "pose jump between frames (%.0fms): ignored, no key", (frameNs - lastPoseNs) / 1e6);
                 }
                 lastPoseNs = frameNs;
 
@@ -265,7 +265,7 @@ public class ArPosition {
             }
         } catch (Throwable t) {
             if (running) {
-                Log.e(VrLog.TAG, "AR ARCore falhou", t);
+                Log.e(VrLog.TAG, "AR ARCore failed", t);
             }
         } finally {
             pipeline.releaseAll();
@@ -292,10 +292,10 @@ public class ArPosition {
         long now = System.nanoTime();
         if (down) {
             setHeldSince(key, now);
-            VrLog.i("AR", "%c desceu frente=%+.2fm lado=%+.2fm", key, pipeline.curForward, pipeline.curSide);
+            VrLog.i("AR", "%c down forward=%+.2fm side=%+.2fm", key, pipeline.curForward, pipeline.curSide);
         }
         else {
-            VrLog.i("AR", "%c subiu frente=%+.2fm lado=%+.2fm segurou=%.1fs", key, pipeline.curForward, pipeline.curSide,
+            VrLog.i("AR", "%c up forward=%+.2fm side=%+.2fm held=%.1fs", key, pipeline.curForward, pipeline.curSide,
                     (now - heldSince(key)) / 1e9);
         }
     }
@@ -320,7 +320,7 @@ public class ArPosition {
         if (now - lastLog < LOG_WINDOW_MS) {
             return;
         }
-        VrLog.i("AR", "quadros=%.0f/s gap_max=%.0fms frente=%+.2f..%+.2fm lado=%+.2f..%+.2fm teclas=%s%s%s%s analogico=%+.2f,%+.2f perdas=%d saltos=%d",
+        VrLog.i("AR", "frames=%.0f/s gap_max=%.0fms forward=%+.2f..%+.2fm side=%+.2f..%+.2fm keys=%s%s%s%s analog=%+.2f,%+.2f losses=%d jumps=%d",
                 winFrames * 1000.0 / (now - lastLog), winMaxGapNs / 1e6,
                 winMinFwd == Float.MAX_VALUE ? 0f : winMinFwd, winMaxFwd == -Float.MAX_VALUE ? 0f : winMaxFwd,
                 winMinSide == Float.MAX_VALUE ? 0f : winMinSide, winMaxSide == -Float.MAX_VALUE ? 0f : winMaxSide,
